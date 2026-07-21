@@ -1,0 +1,33 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # [engine] pulls rtivity-python from git so `modules` is a real import — no
+      # path env var. If the engine repo is private, replace this with a checkout
+      # + `pip install -e ../Rtivity-Python`.
+      - run: pip install -e ".[dev,engine]"
+      - run: ruff check .
+      - run: pytest -v
+
+  eval:
+    # The eval corpus is regenerated from seed, so this is deterministic and
+    # catches detector regressions the unit tests can't see.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: python damsim/generate.py --out /tmp/corpus --n-experiments 12 --seed 42 --adversarial
+      - run: python damsim/score.py --corpus /tmp/corpus --qc-cmd "python skills/dam-qc/scripts/validate_dam.py"

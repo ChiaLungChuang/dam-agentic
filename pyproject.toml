@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dam-agentic"
+version = "0.1.0"
+description = "Agentic QC and analysis over Drosophila Activity Monitor data"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "pandas>=2.2",
+]
+
+[project.optional-dependencies]
+# The analysis engine (rtivity-python) is unpublished, so it is a direct git
+# reference here for CI and fresh installs; for local development install it
+# editable instead: `pip install -e /path/to/Rtivity-Python`. The engine provides
+# the `modules` package that dam_mcp.engine imports.
+engine = ["rtivity-python @ git+https://github.com/ChiaLungChuang/Rtivity-Python"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
+agent = ["langgraph>=0.2", "langchain-anthropic>=0.3", "langchain-mcp-adapters>=0.1"]
+
+[tool.setuptools.packages.find]
+include = ["dam_mcp*", "damsim*", "agent*"]
+exclude = ["tests*", "data*", "config*", "skills*", "docs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+
+[tool.ruff]
+line-length = 92

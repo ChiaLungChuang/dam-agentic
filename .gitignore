@@ -1,0 +1,30 @@
+# Real experimental data — never commit. Lab data, and large.
+data/*
+!data/.gitkeep
+
+# Generated eval corpora — regenerate from seed, don't version binaries
+corpus/
+holdout/
+adversarial/
+**/ground_truth.json
+**/qc_output.json
+
+# Career / application artifacts — THIS REPO IS PUBLIC.
+# Roadmaps, cover letters, and rubric analyses do not belong in it.
+career/
+*cover-letter*
+*roadmap*
+HANDOFF.md
+
+# Session state
+sessions/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
