@@ -90,10 +90,7 @@ To separate `died` from `empty`, look for *any* activity in the run: an empty tu
 zero throughout, a dead fly has a live period first. To find the death point, take the
 last nonzero reading and check that everything after it is zero for a sustained window.
 
-> **Lab-specific:** Set the death threshold (commonly ~24 h of continuous zero, but
-> confirm this lab's convention) and the low-activity `suspect` cutoff. A 24 h window
-> means flies dying in the final day cannot be distinguished from deep quiescence —
-> state that limitation rather than hiding it.
+> **Lab-specific:** Set the death threshold (this lab uses 12 h of continuous zero— confirm before analysis) and the low-activity suspect cutoff. A 12 h window means flies dying in the final 12 h cannot be distinguished from deep quiescence — state that limitation rather than hiding it.
 
 Report a per-monitor tally: how many alive, empty, died, suspect. If more than a few
 channels per monitor are `empty`, the loading sheet probably doesn't match the data,

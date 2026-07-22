@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .defaults import DEFAULT_DEATH_HOURS
 from .errors import ToolError, needs_groups
 from .sessions import Session, SessionStore
 
@@ -183,7 +184,7 @@ def run_validate(paths: list[str], death_hours: float, out_path: Path,
     return json.loads(out_path.read_text())
 
 
-def window_tradeoff(paths: list[str], death_hours: float = 24.0,
+def window_tradeoff(paths: list[str], death_hours: float = DEFAULT_DEATH_HOURS,
                     n_points: int = 6) -> dict:
     """n-alive as a function of where the analysis window ends.
 
@@ -399,7 +400,7 @@ def compute_rhythmicity(ds, method: str = "chi_sq") -> dict:
     return result
 
 
-def compute_survival(ds, death_hours: float = 24.0) -> dict:
+def compute_survival(ds, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     from modules.analysis import survival as surv
 
     sd = surv.build_survival_data(ds.data, dead_window_h=death_hours)

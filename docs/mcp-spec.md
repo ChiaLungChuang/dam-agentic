@@ -294,7 +294,7 @@ units, not a fraction hiding behind the metric's name:
 
 **Other deltas worth knowing:**
 
-- `death_hours` defaults to **24** everywhere in the code (matching the Skill and
+- `death_hours` defaults to **12** everywhere in the code (matching the Skill and
   CLAUDE.md). A shorter window is an operator choice at call time for short runs, with the
   stated tradeoff (more late deaths caught, more deep-quiescence false positives).
 - The QC return shapes the detector's JSON into `tally` (per monitor → state counts) and

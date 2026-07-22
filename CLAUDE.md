@@ -95,8 +95,8 @@ be censored at death, not scored as a perfect sleeper.
 
 ## Known limitations — stated, not bugs
 
-- **Late deaths.** A 24 h trailing-zero window structurally cannot detect a fly dying in
-  the final 24 h. Report; don't "fix" by shrinking the window without thinking about
+- **Late deaths.** A 12 h trailing-zero window structurally cannot detect a fly dying in
+  the final 12 h. Report; don't "fix" by shrinking the window without thinking about
   what that does to false positives.
 - **Single-beam blindness.** Zero counts mean no *midline* crossing. A fly active at one
   end of the tube scores zero. This is a hardware bound and sets the floor on what any

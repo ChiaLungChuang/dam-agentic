@@ -28,3 +28,4 @@ venv/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.DS_Store

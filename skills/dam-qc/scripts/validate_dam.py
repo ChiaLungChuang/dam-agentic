@@ -7,7 +7,7 @@ alignment described in Step 2, and it is reported rather than assumed.
 
 Usage:
     python validate_dam.py Monitor1.txt Monitor2.txt --out qc.json
-    python validate_dam.py data/*.txt --death-hours 24
+    python validate_dam.py data/*.txt --death-hours 12
 
 Thresholds are CLI flags on purpose: they are lab conventions, not constants.
 """
@@ -231,7 +231,7 @@ def _parse_iso(value, label):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="+")
-    ap.add_argument("--death-hours", type=float, default=24.0,
+    ap.add_argument("--death-hours", type=float, default=12.0,
                     help="Trailing zero window to call a channel dead (lab convention)")
     ap.add_argument("--start", default=None,
                     help="Restrict analysis to reads at or after this ISO datetime")

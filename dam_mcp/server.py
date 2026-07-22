@@ -33,6 +33,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from . import config, engine, report
+from .defaults import DEFAULT_DEATH_HOURS
 from .errors import ToolError, needs_groups, needs_qc, unknown_session
 from .schemas import (
     ChannelFlag,
@@ -119,7 +120,7 @@ def describe_experiment(session_id: str) -> dict:
     """
     session = _require(session_id)
     out = STORE.session_dir(session_id) / "describe.json"
-    qc = engine.run_validate(session.paths, death_hours=24.0, out_path=out,
+    qc = engine.run_validate(session.paths, death_hours=DEFAULT_DEATH_HOURS, out_path=out,
                              window=session.window)
     return {
         "session_id": session_id,
@@ -130,7 +131,7 @@ def describe_experiment(session_id: str) -> dict:
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def run_qc(session_id: str, death_hours: float = 24.0) -> dict:
+def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     """Run quality control and classify every channel as alive/empty/died/suspect.
 
     Wraps the tested validate_dam.py detector. `death_hours` is the trailing-zero
@@ -173,7 +174,7 @@ def run_qc(session_id: str, death_hours: float = 24.0) -> dict:
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def window_tradeoff(session_id: str, death_hours: float = 24.0) -> dict:
+def window_tradeoff(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     """Show how n-alive trades off against where the analysis window ends.
 
     Longer window means more flies have died by the cutoff, so fewer are alive to
@@ -202,7 +203,7 @@ def set_analysis_window(
     session_id: str,
     start: str | None = None,
     end: str | None = None,
-    death_hours: float = 24.0,
+    death_hours: float = DEFAULT_DEATH_HOURS,
 ) -> dict:
     """Restrict the analysis to a time window and re-run QC within it.
 
@@ -476,7 +477,7 @@ def compute_rhythmicity(session_id: str, method: str = "chi_sq") -> dict:
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def compute_survival(session_id: str, death_hours: float = 24.0) -> dict:
+def compute_survival(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     """Survival by group: n, events, median survival, and pairwise log-rank tests,
     plus a decisions_required list for animals that recorded activity after their
     inferred death (a glitch, a dislodged fly, or too short a threshold).
