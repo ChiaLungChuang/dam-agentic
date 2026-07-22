@@ -135,10 +135,11 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     """Run quality control and classify every channel as alive/empty/died/suspect.
 
     Wraps the tested validate_dam.py detector. `death_hours` is the trailing-zero
-    window used to call a channel dead — a lab convention, not a constant; a 24 h
-    window structurally cannot see a fly that died in the final day (stated
-    limitation, not a bug). On a run shorter than a few days, a shorter window sees
-    more late deaths at the cost of calling deep quiescence death — a real tradeoff.
+    window used to call a channel dead — a lab convention, not a constant (this
+    lab's default is 12 h); a window that long structurally cannot see a fly that
+    died within its final window (stated limitation, not a bug). A shorter window
+    sees more late deaths at the cost of calling deep quiescence death — a real
+    tradeoff, which window_tradeoff surfaces.
 
     Returns a per-monitor tally, the flagged channels with the evidence for each
     call, and decisions_required — the list of exclusions a human must rule on. It
@@ -149,7 +150,7 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     if death_hours <= 0:
         raise ToolError(
             f"death_hours must be positive; got {death_hours}. It is the hours of "
-            "continuous silence used to call a channel dead (commonly 24)."
+            "continuous silence used to call a channel dead (this lab's default is 12)."
         )
     out = STORE.session_dir(session_id) / f"qc_{death_hours}.json"
     raw = engine.run_validate(session.paths, death_hours=death_hours, out_path=out,

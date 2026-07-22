@@ -48,8 +48,8 @@ and which failure you have is the only useful thing.
 
 ### Known limitations
 
-- **Late deaths.** A 24 h trailing-zero window cannot detect a fly dying in the final
-  24 h of a run. Structural, stated, reported — not a bug.
+- **Late deaths.** A trailing-zero death window (this lab's default is 12 h) cannot
+  detect a fly dying within that final window. Structural, stated, reported — not a bug.
 - **Single-beam blindness.** Zero counts mean no midline crossing. A fly active at one
   end of the tube scores zero. Hardware bound; sets the floor on what any QC can see.
 
