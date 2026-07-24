@@ -22,9 +22,16 @@ import sys
 
 from .prompts import SYSTEM_PROMPT
 
+# The callable Gemini model, not the catalogued one. `gemini-2.5-flash` still
+# appears in ListModels but generateContent returns
+# 404 NOT_FOUND "no longer available to new users" — the catalog is not what is
+# callable, so this is pinned to a model verified end-to-end with curl. Override
+# per run with --model.
+DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash"
+
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
-    "google": "gemini-2.5-flash",
+    "google": DEFAULT_GOOGLE_MODEL,
     "ollama": "qwen3",
 }
 
@@ -71,7 +78,17 @@ def make_llm(provider: str, model: str | None):
         return ChatAnthropic(model=name, temperature=0)
     if provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model=name, temperature=0)
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GOOGLE_API_KEY is not set — export it before running. It must be "
+                "an API key: the Gemini endpoint rejects a Bearer/ADC credential "
+                "with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED."
+            )
+        # Pass the key explicitly as an API key so the SDK cannot fall back to
+        # ambient (Bearer) credentials. temperature is omitted: gemini-3.6-flash
+        # uses fixed sampling defaults and warns that the parameter is ignored.
+        return ChatGoogleGenerativeAI(model=name, google_api_key=api_key)
     if provider == "ollama":
         from langchain_ollama import ChatOllama
         return ChatOllama(model=name, temperature=0)
