@@ -105,3 +105,48 @@ async def test_negative_undeclared_contrast_is_caught(monitor_files, tmp_path):
     ]
     tr = await _drive(script, monitor_files, tmp_path)
     assert not P.contrasts_within_policy(tr).passed
+
+
+# ── empty-trace control (HANDOFF-5): the fake distribution never probed this ───
+#
+# A run that made ZERO tool calls (the shape run_task produced on a swallowed
+# exception) must be a crash, not a score. The old scorers passed it vacuously:
+# every "if X happened, Y first" property is trivially true when nothing happened,
+# so aggregate reported a perfect n=1 run built from an infrastructure failure.
+
+def test_empty_trace_is_a_crash_not_a_score():
+    from evals.scoring import aggregate
+    from evals.trace import Trace
+    score = aggregate("empty", [Trace(task="empty", calls=[])])
+    assert score.n_completed == 0        # nothing was actually measured
+    assert score.n_crashed == 1
+    assert score.no_data is True         # a report from zero completed runs is not a result
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_aborts_the_eval(monitor_files, tmp_path):
+    """A 429 is infrastructure, not agent behaviour: the eval aborts rather than
+    scoring vacuously. Keyless — only the model raises, no network."""
+    os.environ["DAM_MCP_STATE_DIR"] = str(tmp_path)
+    from evals.fake import RaisingModel
+    from evals.run_agent_eval import EvalAborted, EvalTask, run_task
+    boom = RaisingModel(exc=Exception("429 RESOURCE_EXHAUSTED: quota exceeded"))
+    with pytest.raises(EvalAborted):
+        await run_task(EvalTask("rl", "go"), runs=3, model=None,
+                       provider="google", llm=boom)
+
+
+@pytest.mark.asyncio
+async def test_recursion_limit_is_a_crash_datapoint_not_an_abort(monitor_files, tmp_path):
+    """An allowlisted agent-behaviour failure stays a datapoint (a counted crash),
+    it does not abort — and it is never scored."""
+    os.environ["DAM_MCP_STATE_DIR"] = str(tmp_path)
+    from langgraph.errors import GraphRecursionError
+    from evals.fake import RaisingModel
+    from evals.run_agent_eval import EvalTask, run_task
+    boom = RaisingModel(exc=GraphRecursionError("recursion limit of 12 reached"))
+    score, _ = await run_task(EvalTask("rl", "go"), runs=2, model=None,
+                              provider="google", llm=boom)
+    assert (score.n_attempted, score.n_completed, score.n_crashed) == (2, 0, 2)
+    assert score.no_data is True
+    assert any("GraphRecursionError" in c for c in score.crash_causes)
