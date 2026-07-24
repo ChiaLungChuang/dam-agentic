@@ -157,11 +157,26 @@ def test_from_messages_extracts_calls_tokens_and_answer():
 
 def test_aggregate_reports_variance():
     good = _good_trace()
-    bad = Trace(calls=[_call("compute_sleep")])   # skips load/qc/groups
+    bad = Trace(calls=[_call("compute_sleep")])   # scorable, but skips load/qc/groups
     scores = aggregate("qc+sleep", [good, good, good, bad, good])
-    assert scores.n_runs == 5
+    assert scores.n_attempted == 5 and scores.n_completed == 5 and scores.n_crashed == 0
     # 4/5 runs have the full sane sequence
     assert scores.tool_sequence_accuracy == 0.8
     assert 0.0 < scores.property_pass_std["load_first"] < 0.5   # non-zero spread
     report = format_report([scores])
     assert "tool-sequence accuracy" in report and "±" in report
+
+
+def test_aggregate_counts_crashes_and_refuses_to_score_zero():
+    good = _good_trace()
+    crashed = Trace(crashed=True, crash_cause="RateLimit: 429 RESOURCE_EXHAUSTED")
+    empty = Trace(calls=[])                                # zero tool calls -> crash
+    mixed = aggregate("t", [good, crashed, empty])
+    assert (mixed.n_attempted, mixed.n_completed, mixed.n_crashed) == (3, 1, 2)
+    assert len(mixed.crash_causes) == 2                    # distinct causes recorded
+
+    none_done = aggregate("t", [crashed, empty])
+    assert none_done.no_data is True and none_done.n_completed == 0
+    report = format_report([none_done])
+    assert "NO DATA" in report and "RateLimit" in report   # cause surfaced, no metrics
+    assert "tool-sequence accuracy" not in report

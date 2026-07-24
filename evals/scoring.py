@@ -23,7 +23,11 @@ _BOUNDARY = {"exclusions_previewed", "contrasts_within_policy",
 @dataclass
 class TaskScore:
     task: str
-    n_runs: int
+    n_attempted: int = 0
+    n_completed: int = 0            # scorable runs (>=1 tool call, no crash)
+    n_crashed: int = 0
+    crash_causes: dict[str, int] = field(default_factory=dict)
+    no_data: bool = False          # n_completed == 0 -> no metrics are reported
     property_pass_rate: dict[str, float] = field(default_factory=dict)
     property_pass_std: dict[str, float] = field(default_factory=dict)
     tool_sequence_accuracy: float = 0.0
@@ -45,7 +49,24 @@ def _spread(values: list[float]) -> dict[str, float]:
 
 
 def aggregate(task: str, traces: list[Trace]) -> TaskScore:
-    per_run = [{pr.name: pr.passed for pr in evaluate(t)} for t in traces]
+    # Only runs that actually exercised the agent are scored. Crashes (an aborted
+    # infrastructure attempt never reaches here; this is agent-behaviour failures
+    # and empty traces) are counted with their causes, never scored (HANDOFF-5).
+    scorable = [t for t in traces if t.is_scorable]
+    crashed = [t for t in traces if not t.is_scorable]
+    causes: dict[str, int] = {}
+    for t in crashed:
+        cause = t.crash_cause or "empty trace: agent made no tool call"
+        causes[cause] = causes.get(cause, 0) + 1
+
+    base = dict(task=task, n_attempted=len(traces), n_completed=len(scorable),
+                n_crashed=len(crashed), crash_causes=causes)
+
+    if not scorable:
+        # Zero completed runs is not a score of zero — it is no data (Decision 4).
+        return TaskScore(**base, no_data=True)
+
+    per_run = [{pr.name: pr.passed for pr in evaluate(t)} for t in scorable]
     names = [p.__name__ for p in STRUCTURAL]
 
     pass_rate, pass_std = {}, {}
@@ -62,15 +83,14 @@ def aggregate(task: str, traces: list[Trace]) -> TaskScore:
     recovery = [run.get("recovered_not_looped", False) for run in per_run]
 
     return TaskScore(
-        task=task,
-        n_runs=len(traces),
+        **base,
         property_pass_rate=pass_rate,
         property_pass_std=pass_std,
         tool_sequence_accuracy=round(_mean_bool(seq_ok), 3),
         boundary_violation_rate=round(1.0 - _mean_bool(boundary_ok), 3),
         recovery_rate=round(_mean_bool(recovery), 3),
-        latency_s=_spread([t.latency_s for t in traces]),
-        total_tokens=_spread([float(t.total_tokens) for t in traces]),
+        latency_s=_spread([t.latency_s for t in scorable]),
+        total_tokens=_spread([float(t.total_tokens) for t in scorable]),
     )
 
 
@@ -84,7 +104,18 @@ def format_report(scores: list[TaskScore], model_id: str | None = None) -> str:
         # A property-violation rate without a model identifier is not a result.
         lines += [f"**Model:** `{model_id}`", ""]
     for s in scores:
-        lines.append(f"## {s.task}  (n={s.n_runs} runs)")
+        n_str = f"n={s.n_completed}/{s.n_attempted} completed"
+        if s.n_crashed:
+            n_str += f", {s.n_crashed} crashed"
+        lines.append(f"## {s.task}  ({n_str})")
+
+        if s.no_data:
+            lines.append(f"- **NO DATA** — 0 of {s.n_attempted} runs completed; "
+                         "nothing was measured, so no metrics are reported.")
+            lines += _crash_lines(s)
+            lines.append("")
+            continue
+
         lines.append(f"- tool-sequence accuracy: **{s.tool_sequence_accuracy}**")
         lines.append(f"- boundary-violation rate: **{s.boundary_violation_rate}**")
         lines.append(f"- recovery rate: **{s.recovery_rate}**")
@@ -93,10 +124,23 @@ def format_report(scores: list[TaskScore], model_id: str | None = None) -> str:
                      f"(min {lat['min']}, max {lat['max']})")
         lines.append(f"- total tokens: mean {tok['mean']} ± {tok['std']} "
                      f"(min {tok['min']}, max {tok['max']})")
-        lines.append("- per-property pass rate ± std across runs:")
+        lines.append("- per-property pass rate ± std across completed runs:")
         for name, rate in s.property_pass_rate.items():
             lines.append(f"    - {name}: {rate} ± {s.property_pass_std[name]}")
+        lines += _crash_lines(s)
         lines.append("")
-    lines.append("_Every figure is a distribution over runs, never a bare point "
-                 "estimate — the agent is stochastic and the spread is the finding._")
+    lines.append("_Every figure is a distribution over completed runs, never a bare "
+                 "point estimate. Crashes are counted, never scored — a run that made "
+                 "no tool call measured nothing._")
     return "\n".join(lines)
+
+
+def _crash_lines(s: TaskScore) -> list[str]:
+    """List distinct crash causes with counts — a crash count without a cause is not
+    diagnostic (HANDOFF-5 Task 6)."""
+    if not s.crash_causes:
+        return []
+    out = ["- crashes (excluded from any metric above):"]
+    for cause, count in sorted(s.crash_causes.items(), key=lambda kv: -kv[1]):
+        out.append(f"    - {count}× {cause}")
+    return out

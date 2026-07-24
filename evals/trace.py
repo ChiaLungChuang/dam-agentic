@@ -39,6 +39,16 @@ class Trace:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_s: float = 0.0
+    crashed: bool = False
+    crash_cause: str = ""
+
+    @property
+    def is_scorable(self) -> bool:
+        """A run counts only if it actually exercised the agent: it did not crash
+        and it made at least one tool call. A zero-tool-call trace measured nothing,
+        so every 'if X happened, Y first' property would pass vacuously — which is
+        not a pass (HANDOFF-5 Decisions 3 & 4)."""
+        return not self.crashed and len(self.calls) > 0
 
     @property
     def names(self) -> list[str]:
