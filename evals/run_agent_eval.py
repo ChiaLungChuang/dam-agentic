@@ -32,10 +32,60 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from langchain_core.exceptions import OutputParserException
+from langchain_core.tools import ToolException
+from langgraph.errors import GraphRecursionError
+
 from .scoring import aggregate, format_report
-from .trace import from_messages
+from .trace import Trace, from_messages
 
 REPO = Path(__file__).resolve().parent.parent
+
+
+class EvalAborted(RuntimeError):
+    """An infrastructure failure (rate limit, auth, connection, TLS, timeout, or any
+    unrecognised exception) makes the run un-measurable, so it aborts the whole eval
+    rather than becoming a datapoint. A 429 measures the billing tier, not the agent
+    (HANDOFF-5 Decision 1). Fail loud; never widen the allowlist to complete a run.
+    """
+
+
+# Agent-behaviour failure allowlist. Signed off 2026-07-24.
+#
+# These three exceptions are the agent failing at the task, so they are
+# counted as crashes and reported in n_crashed with their cause. Every
+# other exception is infrastructure (quota, auth, TLS, timeout, unknown)
+# and raises EvalAborted: infrastructure failures are not measurements of
+# the agent and must never become datapoints.
+#
+# Caveat on ToolException: it is the ambiguous member. Tools here are the
+# dam_mcp server over stdio, so a ToolException may mean the agent called
+# a tool with bad arguments (agent behaviour, counts) OR that the server
+# itself failed (infrastructure, should have aborted). It is allowlisted
+# because the alternative -- aborting on genuine agent mistakes -- is the
+# worse error. If a run crashes on ToolException, read the message before
+# trusting the aggregate.
+AGENT_FAILURES = (GraphRecursionError, ToolException, OutputParserException)
+
+
+def _is_agent_failure(exc: Exception) -> bool:
+    return isinstance(exc, AGENT_FAILURES)
+
+
+def _abort_reason(exc: Exception) -> str:
+    msg = str(exc).lower()
+    if any(k in msg for k in ("429", "resource_exhausted", "resourceexhausted",
+                              "quota", "rate limit")):
+        return ("provider rate limit / quota exhausted — this measures the billing "
+                "tier, not the agent. The Gemini free tier caps at ~20 requests/day; "
+                "wait for reset or use a paid key. (No backoff can beat a daily quota.)")
+    if any(k in msg for k in ("unauthor", "api key", "api_key", "permission",
+                              "401", "403")):
+        return "provider auth failure — check the API key"
+    if any(k in msg for k in ("ssl", "certificate", "connection", "timeout",
+                              "timed out")):
+        return "connection / TLS / timeout error reaching the provider"
+    return f"unrecognised {type(exc).__name__}: {exc}"
 
 
 @dataclass
@@ -77,50 +127,39 @@ def default_tasks(data_dir: Path) -> list[EvalTask]:
     ]
 
 
-async def run_task(task: EvalTask, runs: int, model: str | None, provider: str):
+async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
+                   llm=None):
+    """Run one task `runs` times. An infrastructure failure raises EvalAborted (the
+    caller aborts the whole eval). An agent-behaviour failure, or a completed run
+    that made no tool call, becomes a recorded crash — counted, never scored.
+
+    `llm` injects a model (a fake) so the abort path can be tested without a key.
+    """
     from agent import build_agent
 
     traces = []
     for _ in range(runs):
-        agent = await build_agent(model=model, provider=provider)
+        agent = await build_agent(model=model, provider=provider, llm=llm)
         start = time.perf_counter()
         try:
-            result = await _ainvoke_with_backoff(
-                agent, {"messages": [("user", task.prompt)]},
-                {"recursion_limit": 12})             # first-run leash (HANDOFF-4 §8)
-            messages = result["messages"]
-        except Exception as exc:                     # a crashed run is still a datapoint
-            messages = [_ErrMsg(str(exc))]
-        latency = time.perf_counter() - start
-        traces.append(from_messages(task.name, messages, latency_s=latency))
-    return aggregate(task.name, traces), traces
-
-
-async def _ainvoke_with_backoff(agent, payload, config, waits=(1, 2, 4, 8)):
-    """Retry on a provider rate-limit (429) with exponential backoff. Free tiers
-    (Gemini) allow only a few requests/minute and a ReAct loop is several calls per
-    run, so 429s are expected — back off rather than hardcode a limit that Google
-    changes without notice."""
-    last = None
-    for wait in (0, *waits):
-        if wait:
-            await asyncio.sleep(wait)
-        try:
-            return await agent.ainvoke(payload, config=config)
+            result = await agent.ainvoke(
+                {"messages": [("user", task.prompt)]},
+                config={"recursion_limit": 12})      # first-run leash (HANDOFF-4 §8)
         except Exception as exc:
-            if any(k in str(exc).lower()
-                   for k in ("429", "resourceexhausted", "rate limit", "quota")):
-                last = exc
-                continue
-            raise
-    raise last
+            if not _is_agent_failure(exc):
+                raise EvalAborted(_abort_reason(exc)) from exc
+            traces.append(Trace(
+                task=task.name, latency_s=time.perf_counter() - start, crashed=True,
+                crash_cause=f"{type(exc).__name__}: {str(exc)[:200]}"))
+            continue
 
-
-class _ErrMsg:
-    def __init__(self, text):
-        self.type = "ai"
-        self.content = f"[run crashed] {text}"
-        self.tool_calls = []
+        trace = from_messages(task.name, result["messages"],
+                              latency_s=time.perf_counter() - start)
+        if not trace.calls:
+            trace.crashed = True
+            trace.crash_cause = "empty trace: agent completed without any tool call"
+        traces.append(trace)
+    return aggregate(task.name, traces), traces
 
 
 # ── constrained judge (report prose only) ─────────────────────────────────────
@@ -206,7 +245,12 @@ def main() -> int:
     ap.add_argument("--model", default=None, help="override the provider's default id")
     ap.add_argument("--judge", action="store_true", help="grade report prose (needs a key)")
     ap.add_argument("--out", default=None)
-    return asyncio.run(_main(ap.parse_args()))
+    try:
+        return asyncio.run(_main(ap.parse_args()))
+    except EvalAborted as exc:
+        print(f"\nEVAL ABORTED: {exc}\n(No report written — an infrastructure "
+              "failure is not a measurement.)", file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":

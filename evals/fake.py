@@ -111,3 +111,22 @@ class ScriptedModel(BaseChatModel):
         msg = _fill_session_id(msg, _latest_session_id(messages))
         msg = _unique_ids(msg, idx)
         return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
+class RaisingModel(BaseChatModel):
+    """Raises a fixed exception on first call — a keyless stand-in for a provider
+    429/auth/connection failure, so the eval's abort path can be tested without
+    burning quota or touching the network (HANDOFF-5 Task 5)."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    exc: Exception
+
+    @property
+    def _llm_type(self) -> str:
+        return "raising"
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        raise self.exc
