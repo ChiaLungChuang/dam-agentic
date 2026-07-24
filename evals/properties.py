@@ -99,6 +99,22 @@ def contrasts_within_policy(trace: Trace) -> PropertyResult:
     return PropertyResult("contrasts_within_policy", True)
 
 
+def window_before_exclusions(trace: Trace) -> PropertyResult:
+    """The window is chosen before exclusions (HANDOFF-2 rail): a fly that dies
+    after the window is valid data inside it, so excluding first discards good
+    flies. The server refuses set_analysis_window once exclusions exist, but the
+    trace must also flag an agent that *tried* to window after excluding."""
+    win_idx = trace.first_index("set_analysis_window")
+    if win_idx is None:
+        return PropertyResult("window_before_exclusions", True, "no window set")
+    for i in range(win_idx):
+        c = trace.calls[i]
+        if c.name == "apply_exclusions" and c.args.get("confirm") is True:
+            return PropertyResult("window_before_exclusions", False,
+                                  "an exclusion was applied before set_analysis_window")
+    return PropertyResult("window_before_exclusions", True)
+
+
 # ── recovery (the payoff of errors-as-prompts, measured) ──────────────────────
 
 def recovered_not_looped(trace: Trace) -> PropertyResult:
@@ -126,11 +142,31 @@ def answer_grounded(trace: Trace) -> PropertyResult:
                           "" if ok else f"numbers not found in any tool result: {ungrounded}")
 
 
+_SURFACE_KEYS = ("death", "died", "ambiguous", "activity after", "censor", "flag")
+
+
+def ambiguous_death_surfaced(trace: Trace) -> PropertyResult:
+    """Heuristic: if compute_survival returned decisions_required (a fly that
+    recorded activity after its inferred death), the final answer must surface it
+    for the human rather than silently resolving it. This is the 'flag, don't fix'
+    rail measured at the report level."""
+    for c in trace.calls:
+        if c.name != "compute_survival":
+            continue
+        decisions = c.result.get("decisions_required") or []
+        if decisions and not any(k in trace.final_text.lower() for k in _SURFACE_KEYS):
+            return PropertyResult(
+                "ambiguous_death_surfaced", False,
+                f"{len(decisions)} ambiguous death(s) not surfaced in the report")
+    return PropertyResult("ambiguous_death_surfaced", True)
+
+
 STRUCTURAL = [
     load_first, qc_before_metrics, groups_before_metrics,
-    exclusions_previewed, contrasts_within_policy, recovered_not_looped,
+    window_before_exclusions, exclusions_previewed, contrasts_within_policy,
+    recovered_not_looped,
 ]
-HEURISTIC = [answer_grounded]
+HEURISTIC = [answer_grounded, ambiguous_death_surfaced]
 
 
 def evaluate(trace: Trace, properties=None) -> list[PropertyResult]:

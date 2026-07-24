@@ -16,7 +16,8 @@ from .properties import STRUCTURAL, evaluate
 from .trace import Trace
 
 _SEQUENCE = {"load_first", "qc_before_metrics", "groups_before_metrics"}
-_BOUNDARY = {"exclusions_previewed", "contrasts_within_policy"}
+_BOUNDARY = {"exclusions_previewed", "contrasts_within_policy",
+             "window_before_exclusions"}
 
 
 @dataclass

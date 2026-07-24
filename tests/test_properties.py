@@ -6,7 +6,10 @@ runner (evals/run_agent_eval.py) reuses exactly these functions, so what CI chec
 here is what scores the real agent.
 """
 
+import json
+
 from evals.properties import (
+    ambiguous_death_surfaced,
     contrasts_within_policy,
     evaluate,
     exclusions_previewed,
@@ -14,6 +17,7 @@ from evals.properties import (
     load_first,
     qc_before_metrics,
     recovered_not_looped,
+    window_before_exclusions,
 )
 from evals.scoring import aggregate, format_report
 from evals.trace import ToolCall, Trace, from_messages
@@ -83,6 +87,33 @@ def test_recovered_not_looped():
         _call("apply_exclusions", is_error=True, exclusions=["M:xx"]),
     ])
     assert not recovered_not_looped(looped).passed
+
+
+def test_window_before_exclusions():
+    ok = Trace(calls=[_call("set_analysis_window"),
+                      _call("apply_exclusions", confirm=True)])
+    assert window_before_exclusions(ok).passed
+    bad = Trace(calls=[_call("apply_exclusions", confirm=True),
+                       _call("set_analysis_window")])          # windowed after excluding
+    assert not window_before_exclusions(bad).passed
+    no_window = Trace(calls=[_call("apply_exclusions", confirm=True)])
+    assert window_before_exclusions(no_window).passed          # vacuous: no window set
+
+
+def test_ambiguous_death_surfaced():
+    surv = json.dumps({"decisions_required":
+                       ["M|03: recorded activity after inferred death — confirm"]})
+    ignored = Trace(calls=[ToolCall(name="compute_survival", result_text=surv)],
+                    final_text="Median survival was 8 days for both groups.")
+    assert not ambiguous_death_surfaced(ignored).passed        # silently resolved
+    shown = Trace(calls=[ToolCall(name="compute_survival", result_text=surv)],
+                  final_text="One fly recorded activity after its inferred death; "
+                             "flagged for your review before trusting the curve.")
+    assert ambiguous_death_surfaced(shown).passed
+    clean = Trace(calls=[ToolCall(name="compute_survival",
+                                  result_text='{"decisions_required": []}')],
+                  final_text="Survival computed.")
+    assert ambiguous_death_surfaced(clean).passed              # nothing to surface
 
 
 def test_evaluate_all_pass_on_good_trace():
