@@ -77,8 +77,11 @@ def _mean_bool(bits: list[bool]) -> float:
     return statistics.mean(1.0 if b else 0.0 for b in bits) if bits else 0.0
 
 
-def format_report(scores: list[TaskScore]) -> str:
+def format_report(scores: list[TaskScore], model_id: str | None = None) -> str:
     lines = ["# Agentic eval report", ""]
+    if model_id:
+        # A property-violation rate without a model identifier is not a result.
+        lines += [f"**Model:** `{model_id}`", ""]
     for s in scores:
         lines.append(f"## {s.task}  (n={s.n_runs} runs)")
         lines.append(f"- tool-sequence accuracy: **{s.tool_sequence_accuracy}**")

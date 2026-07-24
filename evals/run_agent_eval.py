@@ -6,16 +6,20 @@ properties.py run over each trace; scoring.py aggregates into a distribution. A
 constrained LLM judge grades only the final report's prose, against an explicit
 rubric — everything structural is decided deterministically.
 
-Needs the agent dependencies and a key (this is the "permit" part):
+Needs the agent dependencies and a provider (this is the "permit" part). No paid
+Anthropic key is required — the free Gemini tier works:
 
     pip install -e ".[agent]"
-    export ANTHROPIC_API_KEY=...
+    export GOOGLE_API_KEY=...     # free Google AI Studio tier
+    python -m evals.run_agent_eval --synthetic --runs 5 --provider google
+    python -m evals.run_agent_eval --data /path/to/experiment --runs 5 --provider google
 
-    python -m evals.run_agent_eval --data /path/to/experiment --runs 5 --out report.md
-    python -m evals.run_agent_eval --synthetic --runs 5          # smoke corpus
+    # or, with a paid key:
+    export ANTHROPIC_API_KEY=... && python -m evals.run_agent_eval --data ... --runs 5
 
-Keep it anchored to a real experiment where you can. The harness earns its place
-only if the server, the agent, and the tasks are real.
+The harness (transport, tools, scoring) is exercised with NO key by the fake-model
+controls in tests/test_fake_agent.py. This runner adds a real, stochastic model on
+top. Keep it anchored to a real experiment where you can.
 """
 
 from __future__ import annotations
@@ -73,21 +77,43 @@ def default_tasks(data_dir: Path) -> list[EvalTask]:
     ]
 
 
-async def run_task(task: EvalTask, runs: int, model: str | None):
+async def run_task(task: EvalTask, runs: int, model: str | None, provider: str):
     from agent import build_agent
 
     traces = []
     for _ in range(runs):
-        agent = await build_agent(model=model)
+        agent = await build_agent(model=model, provider=provider)
         start = time.perf_counter()
         try:
-            result = await agent.ainvoke({"messages": [("user", task.prompt)]})
+            result = await _ainvoke_with_backoff(
+                agent, {"messages": [("user", task.prompt)]},
+                {"recursion_limit": 12})             # first-run leash (HANDOFF-4 §8)
             messages = result["messages"]
         except Exception as exc:                     # a crashed run is still a datapoint
             messages = [_ErrMsg(str(exc))]
         latency = time.perf_counter() - start
         traces.append(from_messages(task.name, messages, latency_s=latency))
     return aggregate(task.name, traces), traces
+
+
+async def _ainvoke_with_backoff(agent, payload, config, waits=(1, 2, 4, 8)):
+    """Retry on a provider rate-limit (429) with exponential backoff. Free tiers
+    (Gemini) allow only a few requests/minute and a ReAct loop is several calls per
+    run, so 429s are expected — back off rather than hardcode a limit that Google
+    changes without notice."""
+    last = None
+    for wait in (0, *waits):
+        if wait:
+            await asyncio.sleep(wait)
+        try:
+            return await agent.ainvoke(payload, config=config)
+        except Exception as exc:
+            if any(k in str(exc).lower()
+                   for k in ("429", "resourceexhausted", "rate limit", "quota")):
+                last = exc
+                continue
+            raise
+    raise last
 
 
 class _ErrMsg:
@@ -111,11 +137,12 @@ Report:
 ---"""
 
 
-async def judge_report(final_text: str, model: str | None) -> dict:
+async def judge_report(final_text: str, model: str | None, provider: str) -> dict:
     import json
 
-    from langchain_anthropic import ChatAnthropic
-    llm = ChatAnthropic(model=model or "claude-sonnet-4-5", temperature=0)
+    from agent.graph import _inject_truststore, make_llm
+    _inject_truststore()
+    llm = make_llm(provider, model)
     resp = await llm.ainvoke(_RUBRIC % final_text[:4000])
     try:
         return json.loads(resp.content if isinstance(resp.content, str)
@@ -142,18 +169,22 @@ async def _main(args) -> int:
         print(f"No Monitor*.txt in {data_dir}", file=sys.stderr)
         return 2
 
+    from agent.graph import resolved_model
+    model_id = f"{args.provider}:{resolved_model(args.provider, args.model)}"
+
     tasks = default_tasks(data_dir)
     scores = []
     for task in tasks:
-        print(f"running {task.name} x{args.runs} ...", file=sys.stderr)
-        score, traces = await run_task(task, args.runs, args.model)
+        print(f"running {task.name} x{args.runs} [{model_id}] ...", file=sys.stderr)
+        score, traces = await run_task(task, args.runs, args.model, args.provider)
         if args.judge:
-            grades = [await judge_report(t.final_text, args.model) for t in traces]
+            grades = [await judge_report(t.final_text, args.model, args.provider)
+                      for t in traces]
             kept = [g["score"] for g in grades if g.get("score") is not None]
             score.report_prose = round(sum(kept) / len(kept), 2) if kept else None
         scores.append(score)
 
-    report = format_report(scores)
+    report = format_report(scores, model_id=model_id)
     if args.judge:
         report += "\n\n## Report-prose judge (rubric, 0-3)\n" + "\n".join(
             f"- {s.task}: {getattr(s, 'report_prose', 'n/a')}" for s in scores)
@@ -169,7 +200,10 @@ def main() -> int:
     src.add_argument("--data", help="experiment folder with Monitor*.txt")
     src.add_argument("--synthetic", action="store_true", help="use a damsim corpus")
     ap.add_argument("--runs", type=int, default=5, help="runs per task (>=5)")
-    ap.add_argument("--model", default=None)
+    ap.add_argument("--provider", default="anthropic",
+                    choices=["anthropic", "google", "ollama"],
+                    help="model family; 'google' uses the free Gemini tier")
+    ap.add_argument("--model", default=None, help="override the provider's default id")
     ap.add_argument("--judge", action="store_true", help="grade report prose (needs a key)")
     ap.add_argument("--out", default=None)
     return asyncio.run(_main(ap.parse_args()))
