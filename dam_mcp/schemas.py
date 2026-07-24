@@ -44,6 +44,15 @@ class LoadResult(BaseModel):
     name: str
     n_monitors: int
     monitors: list[MonitorSummary]
+    monitor_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The exact monitor keys to use in later calls (assign_groups, "
+            "apply_exclusions). These are filenames, not paths: the caller is "
+            "usually handed full paths, so the canonical form is stated here "
+            "rather than left to be guessed."
+        ),
+    )
     time_window: list[str]                 # [common_start, common_end]
     warnings: list[str] = Field(default_factory=list)
     next: str = Field(

@@ -27,6 +27,7 @@ Two protocol-level conventions worth stating:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -81,6 +82,10 @@ def load_experiment(paths: list[str], name: str) -> dict:
     later call, plus a structural summary: monitor count, reads and channels per
     file, the common time window, inferred bin width, and any warnings.
 
+    Also returns `monitor_keys`: the exact strings to use as the monitor key in
+    assign_groups and apply_exclusions. They are filenames, not paths — use them
+    verbatim rather than the paths passed in here.
+
     Does NOT return activity counts — those stay server-side for the whole session.
     Call run_qc next; metrics computed before QC are not trustworthy.
     """
@@ -104,6 +109,7 @@ def load_experiment(paths: list[str], name: str) -> dict:
         monitors=[MonitorSummary(**{k: m[k] for k in
                   ("file", "n_reads", "n_channels", "first_ts", "last_ts",
                    "bin_seconds")}) for m in monitors],
+        monitor_keys=[m["file"] for m in monitors],
         time_window=[max(starts), min(ends)],
         warnings=warnings,
     ).model_dump()
@@ -262,9 +268,17 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
     infer genotype or condition from the data; it only records what the human
     provides.
 
-    `mapping` is {group_label: {monitor_filename: channels}} where channels is a
-    two-element [low, high] inclusive range (e.g. [1, 16]), an explicit list of
-    channel numbers, or a spec string like "1-16" or "1,3,5-8".
+    `mapping` is {group_label: {monitor_key: channels}}.
+
+    The monitor key is a filename as returned in load_experiment's `monitor_keys`
+    (e.g. "Monitor1.txt"). A full path is also accepted and reduced to its
+    filename, so paths handed in by a caller do not have to be converted first.
+
+    `channels` accepts exactly three forms:
+      * [low, high]        — a two-element INCLUSIVE range, e.g. [1, 16]
+      * [c1, c2, c3, ...]  — an explicit list of channel numbers (length != 2)
+      * "1-16" / "1,3,5-8" — a spec string
+    Channel numbers are 1-32. Anything else is refused rather than guessed at.
 
     Refuses if the labels do not cover the groups the declared contrasts compare
     (a legal contrast id must never point at a group that does not exist). Warns —
@@ -293,11 +307,17 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
             )
         if label not in order_of:
             order_of[label] = len(order_of) + 1
-        for monitor, spec in per_file.items():
+        for raw_monitor, spec in per_file.items():
+            # Callers are routinely handed full paths (a task prompt names the
+            # files by path) while the session keys on filenames. Normalise rather
+            # than refuse: both readings of the contract are reasonable, so the
+            # tool accepts either instead of making the caller guess.
+            monitor = os.path.basename(str(raw_monitor))
             if monitor not in known_files:
                 raise ToolError(
-                    f"Monitor '{monitor}' is not in this session. Loaded files are: "
-                    f"{sorted(known_files)}. Use the exact filename."
+                    f"Monitor '{raw_monitor}' is not in this session. Loaded files "
+                    f"are: {sorted(known_files)}. Use one of those keys (they are "
+                    "also returned by load_experiment as monitor_keys)."
                 )
             for ch in _expand_channels(spec):
                 clash = seen.setdefault(monitor, set())
