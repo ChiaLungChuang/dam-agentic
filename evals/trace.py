@@ -38,6 +38,11 @@ class Trace:
     final_text: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    # Thinking models (gemini-3.6-flash) spend most of their output on reasoning:
+    # a 2-character answer measured 85 thought tokens of 91 total. LangChain folds
+    # thoughts into output_tokens, so this is a *subset* of output_tokens surfaced
+    # separately — never add it to the total.
+    reasoning_tokens: int = 0
     latency_s: float = 0.0
     crashed: bool = False
     crash_cause: str = ""
@@ -79,13 +84,15 @@ def from_messages(task: str, messages: list, latency_s: float = 0.0) -> Trace:
     pending: dict[str, dict] = {}          # tool_call_id -> {name, args}
     results: dict[str, dict] = {}          # tool_call_id -> {text, is_error}
     order: list[str] = []
-    in_tok = out_tok = 0
+    in_tok = out_tok = reason_tok = 0
     final_text = ""
 
     for msg in messages:
         usage = getattr(msg, "usage_metadata", None) or {}
         in_tok += int(usage.get("input_tokens", 0) or 0)
         out_tok += int(usage.get("output_tokens", 0) or 0)
+        reason_tok += int((usage.get("output_token_details") or {}).get("reasoning", 0)
+                          or 0)
 
         for tc in getattr(msg, "tool_calls", None) or []:
             tc_id = tc.get("id") or f"call-{len(order)}"
@@ -110,7 +117,8 @@ def from_messages(task: str, messages: list, latency_s: float = 0.0) -> Trace:
                               is_error=r["is_error"], result_text=r["text"]))
 
     return Trace(task=task, calls=calls, final_text=final_text,
-                 input_tokens=in_tok, output_tokens=out_tok, latency_s=latency_s)
+                 input_tokens=in_tok, output_tokens=out_tok,
+                 reasoning_tokens=reason_tok, latency_s=latency_s)
 
 
 def _as_text(content) -> str:
