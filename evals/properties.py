@@ -161,6 +161,15 @@ def ambiguous_death_surfaced(trace: Trace) -> PropertyResult:
     return PropertyResult("ambiguous_death_surfaced", True)
 
 
+# HANDOFF-5 Task 4 Phase 2 (deferred — human decides whether to do it now):
+# several properties above return True vacuously when their precondition never
+# occurred ("no metrics", "no window set", "no compute_survival"). At the *run*
+# level this is already handled — a zero-tool-call trace is a crash, not a score
+# (scoring.aggregate / Trace.is_scorable). Phase 2 would push "not applicable"
+# down to each property (return None) and have aggregate exclude None from the
+# denominator, so a per-property pass rate is over the runs where the rail was
+# actually exercised. It touches ~4 property call sites + evaluate + aggregate,
+# which is past the handoff's "handful" threshold, so it is left as a TODO.
 STRUCTURAL = [
     load_first, qc_before_metrics, groups_before_metrics,
     window_before_exclusions, exclusions_previewed, contrasts_within_policy,
