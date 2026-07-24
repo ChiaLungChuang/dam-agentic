@@ -25,8 +25,9 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff==0.16.0"]
 agent = [
     "langgraph>=0.2", "langchain-mcp-adapters>=0.1",
     "langchain-anthropic>=0.3",       # --provider anthropic
-    "langchain-google-genai>=2.0",    # --provider google (free Gemini tier)
+    "langchain-google-genai>=2.0",    # --provider google (Gemini)
     "truststore>=0.9",                # TLS via the OS trust store, not certifi
+    "python-dotenv>=1.0",             # load .env; was only arriving transitively
 ]
 
 [tool.setuptools.packages.find]

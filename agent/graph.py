@@ -19,8 +19,11 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from .prompts import SYSTEM_PROMPT
+
+REPO = Path(__file__).resolve().parent.parent
 
 # The callable Gemini model, not the catalogued one. `gemini-2.5-flash` still
 # appears in ListModels but generateContent returns
@@ -69,10 +72,29 @@ def _inject_truststore() -> None:
         pass
 
 
+def load_env() -> None:
+    """Load .env so a key stored there actually reaches the provider SDK.
+
+    This is not cosmetic. With GOOGLE_API_KEY present only in .env, nothing put it
+    in the environment, so the Google SDK fell through to ambient credential
+    resolution and sent the request as a Bearer token — which Gemini rejects with
+    401 ACCESS_TOKEN_TYPE_UNSUPPORTED, while the *same* credential authenticated
+    fine via curl's x-goog-api-key header. The apparent "SDK auth bug" was an
+    unloaded .env. python-dotenv is declared in the `agent` extra; do not rely on
+    it arriving transitively (it was previously present only via pydantic-settings).
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(REPO / ".env")
+
+
 def make_llm(provider: str, model: str | None):
     """Instantiate a chat model for a provider. Imports are local so a server-only
     environment never needs the provider SDKs."""
     name = resolved_model(provider, model)
+    load_env()
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(model=name, temperature=0)
@@ -81,9 +103,10 @@ def make_llm(provider: str, model: str | None):
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "GOOGLE_API_KEY is not set — export it before running. It must be "
-                "an API key: the Gemini endpoint rejects a Bearer/ADC credential "
-                "with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED."
+                "GOOGLE_API_KEY is not set. Put it in the repo's .env file "
+                "(GOOGLE_API_KEY=...) or export it. It must be an API key: the "
+                "Gemini endpoint rejects a Bearer/ADC credential with 401 "
+                "ACCESS_TOKEN_TYPE_UNSUPPORTED."
             )
         # Pass the key explicitly as an API key so the SDK cannot fall back to
         # ambient (Bearer) credentials. temperature is omitted: gemini-3.6-flash

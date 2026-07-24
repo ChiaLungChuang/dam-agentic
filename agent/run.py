@@ -30,6 +30,8 @@ async def _main(query: str, provider: str, model: str | None) -> int:
 
 
 def main() -> int:
+    from .graph import load_env
+    load_env()          # .env -> environment before any provider client is built
     ap = argparse.ArgumentParser(description="Drive the DAM agent")
     ap.add_argument("request", help="natural-language task for the agent")
     ap.add_argument("--provider", default="anthropic",

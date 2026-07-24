@@ -43,10 +43,14 @@ def test_key_is_passed_as_api_key_not_bearer_credentials(monkeypatch):
     assert getattr(llm, "credentials", None) is None       # never a credentials object
 
 
-def test_missing_google_key_fails_with_an_actionable_message(monkeypatch):
+def test_missing_google_key_fails_with_an_actionable_message(monkeypatch, tmp_path):
+    # Point .env loading at an empty dir so the developer's real key cannot leak
+    # into this test and make it pass for the wrong reason.
+    import agent.graph as g
+    monkeypatch.setattr(g, "REPO", tmp_path)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     with pytest.raises(RuntimeError) as exc:
         make_llm("google", None)
     msg = str(exc.value)
-    assert "GOOGLE_API_KEY" in msg and "API key" in msg
+    assert "GOOGLE_API_KEY" in msg and ".env" in msg

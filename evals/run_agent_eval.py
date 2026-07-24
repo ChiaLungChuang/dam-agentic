@@ -6,16 +6,24 @@ properties.py run over each trace; scoring.py aggregates into a distribution. A
 constrained LLM judge grades only the final report's prose, against an explicit
 rubric — everything structural is decided deterministically.
 
-Needs the agent dependencies and a provider (this is the "permit" part). No paid
-Anthropic key is required — the free Gemini tier works:
+Needs the agent dependencies and a provider key (this is the "permit" part):
 
     pip install -e ".[agent]"
-    export GOOGLE_API_KEY=...     # free Google AI Studio tier
-    python -m evals.run_agent_eval --synthetic --runs 5 --provider google
+
+The key is read from the repo's `.env` (loaded via python-dotenv, a declared
+dependency) or from the environment — either works:
+
+    # .env
+    GOOGLE_API_KEY=...
+
+    python -m evals.run_agent_eval --synthetic --runs 1 --provider google
     python -m evals.run_agent_eval --data /path/to/experiment --runs 5 --provider google
 
-    # or, with a paid key:
-    export ANTHROPIC_API_KEY=... && python -m evals.run_agent_eval --data ... --runs 5
+    # or Anthropic:
+    ANTHROPIC_API_KEY=... python -m evals.run_agent_eval --data ... --runs 5
+
+It must be an API key. If the Google SDK falls back to ambient/ADC credentials it
+sends a Bearer token and Gemini answers 401 ACCESS_TOKEN_TYPE_UNSUPPORTED.
 
 The harness (transport, tools, scoring) is exercised with NO key by the fake-model
 controls in tests/test_fake_agent.py. This runner adds a real, stochastic model on
@@ -203,6 +211,8 @@ def _synthetic_corpus() -> Path:
 
 
 async def _main(args) -> int:
+    from agent.graph import load_env
+    load_env()          # .env -> environment before any provider client is built
     data_dir = _synthetic_corpus() if args.synthetic else Path(args.data)
     if not sorted(data_dir.glob("Monitor*.txt")):
         print(f"No Monitor*.txt in {data_dir}", file=sys.stderr)
