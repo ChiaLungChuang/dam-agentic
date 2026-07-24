@@ -195,3 +195,38 @@ Layer 2 agentic eval on real data (`python -m evals.run_agent_eval --data ...`, 
 API key), and the frailty-marker research question in `changepoint-frailty-note.md`
 (needs ≥5-day runs). The HITL-relevant [human] items from HANDOFF-2 remain: the
 monitor/treatment confound, and writing the real `config/contrasts.yaml`.
+
+## Lint policy
+
+`[tool.ruff.lint] select = ["E4", "E7", "E9", "F"]` — ruff's historical default,
+written down. `ruff` is pinned to an exact version in `[dev]`.
+
+Both are deliberate. Before Jul 2026 the config set only `line-length`, so the
+effective rule set was whatever that ruff version happened to default to. CI
+resolved `ruff>=0.6` to 0.16.0 against a locally-validated 0.15.22 and reported
+57 findings on unchanged code. "ruff clean" was a version-dependent claim with
+nothing pinning the version.
+
+If the rule set is ever widened, these are already decided:
+
+- **DTZ001 / DTZ007 — reject.** TriKinetics DAM files carry no timezone. These
+  timestamps are naive by nature; forcing tz-aware parsing would introduce a bug,
+  not fix one. Needs an explicit ignore carrying this reason, not a fix.
+- **BLE001 in `evals/run_agent_eval.py` — reject.** The blind catch is
+  deliberate: a crashed run is still a datapoint.
+- **I001, PLW1510 — adopt when convenient.** Import sorting is `--fix`-able;
+  `check=False` just states intent where returncode is already handled by hand.
+
+Do not run `ruff check --fix --unsafe-fixes` on this repo.
+
+## CI structure
+
+Three independent jobs: `lint`, `test` (3.11/3.12/3.13), `eval`.
+
+- Lint is its own job. It used to be a step inside `test`, so a linter version
+  bump wiped out all test signal across three Python versions at once.
+- `fail-fast: false` on the test matrix — one version failing must not cancel
+  the others.
+- Nothing counts as verified until it has been verified somewhere other than a
+  laptop. The unpinned-linter problem was invisible locally and only surfaced
+  when a second machine ran the same command.
