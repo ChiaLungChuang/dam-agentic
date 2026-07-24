@@ -158,7 +158,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--qc-cmd", required=True)
-    ap.add_argument("--death-hours", type=float, default=24.0)
+    ap.add_argument("--death-hours", type=float, default=12.0,
+                    help="Match production's DEFAULT_DEATH_HOURS so the eval scores "
+                         "the detector in the configuration it actually runs in.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -189,8 +191,8 @@ def main():
         lt = adv["late_deaths_found"] + adv["late_deaths_missed"]
         dc = adv["declines_surfaced"] + adv["declines_silently_passed"]
         print("\nADVERSARIAL (defects the detector was not written to catch)")
-        print(f"  late deaths (<24h):  found {adv['late_deaths_found']}/{lt}"
-              f"  -> KNOWN LIMITATION, not a bug")
+        print(f"  late deaths (in final death-window):  found "
+              f"{adv['late_deaths_found']}/{lt}  -> KNOWN LIMITATION, not a bug")
         print(f"  gradual declines:    surfaced {adv['declines_surfaced']}/{dc}, "
               f"silently passed {adv['declines_silently_passed']}")
         print("  (declines have no ground-truth answer; the only failure is deciding silently)")

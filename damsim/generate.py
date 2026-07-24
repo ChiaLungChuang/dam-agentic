@@ -148,9 +148,11 @@ def make_experiment(outdir, exp_id, seed, n_monitors=2, days=3, adversarial=Fals
             if ch in empty:
                 channels[ch] = [0] * n_bins
             elif ch in late_dead:
-                # Dies inside the final 24 h — below the detector's trailing-zero
-                # window, so it is structurally undetectable at death_hours=24.
-                death_bin = random.randint(n_bins - 1200, n_bins - 200)
+                # Dies inside the final <12 h — below the detector's trailing-zero
+                # window at the production default (death_hours=12), so it is
+                # structurally undetectable there. Kept short enough that the ~24 h
+                # decline check still sees mostly activity and does not flag it.
+                death_bin = random.randint(n_bins - 700, n_bins - 100)
                 channels[ch] = simulate_channel(n_bins, start, alive_until_bin=death_bin)
                 lm = max(i for i, v in enumerate(channels[ch]) if v > 0)
                 late_deaths[str(ch + 1)] = (start + timedelta(minutes=lm)).isoformat()
@@ -160,8 +162,9 @@ def make_experiment(outdir, exp_id, seed, n_monitors=2, days=3, adversarial=Fals
                                                                int(n_bins * 0.6)))
                 declines[str(ch + 1)] = "ambiguous"
             elif ch in dead:
-                # Death must leave enough trailing zeros to be callable at 24 h,
-                # otherwise the label is a lie the detector can't be blamed for.
+                # Death must leave enough trailing zeros to be callable at the death
+                # window (>=12 h here), else the label is a lie the detector can't be
+                # blamed for. n_bins-1500 (~25 h) clears both 12 h and 24 h windows.
                 death_bin = random.randint(int(n_bins * 0.25), n_bins - 1500)
                 channels[ch] = simulate_channel(n_bins, start, alive_until_bin=death_bin)
                 last_move = max(i for i, v in enumerate(channels[ch]) if v > 0)
