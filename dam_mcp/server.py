@@ -367,8 +367,18 @@ def apply_exclusions(
     """Exclude channels from the analysis. This is the human-in-the-loop gate:
     every exclusion changes n and the interpretation, so it is deliberate.
 
-    `exclusions` is a list of "MonitorFile:channel" (e.g. "Monitor1.txt:5").
-    `reason` is recorded with each and shown in the report.
+    `exclusions` is a list of "MonitorFile:channel" (e.g. "Monitor1.txt:5"). The
+    monitor key is one of load_experiment's `monitor_keys`; a full path is accepted
+    and reduced to its filename. `reason` is recorded with each and shown in the
+    report.
+
+    A key that matches no loaded monitor is refused — that is always a caller
+    mistake (a typo, an unloaded monitor, a stale key from another session), never
+    a silent no-op. A key that *does* resolve but matches no assigned channel is
+    legitimate and returns n_excluded=0 instead of an error.
+
+    Returns n_before, n_after and n_excluded alongside n per group, so "excluded
+    two flies" and "excluded nobody" are distinguishable in the result itself.
 
     Call once with confirm=false to preview the effect (which channels, and the
     new n per group); the exclusion is NOT applied. Then, after the human agrees,
@@ -387,6 +397,21 @@ def apply_exclusions(
         )
     parsed = [_parse_exclusion(e) for e in exclusions]
 
+    # An unresolvable monitor key is always a caller mistake, so it fails loudly
+    # here rather than being recorded as an exclusion that matches nothing. This
+    # is the same refusal assign_groups makes; the two tools disagreeing about an
+    # identical bad key was the defect.
+    known_files = {m["file"] for m in session.monitors}
+    unknown = sorted({m for m, _ in parsed if m not in known_files})
+    if unknown:
+        names = ", ".join(f"'{u}'" for u in unknown)
+        noun, verb = ("Monitor", "is") if len(unknown) == 1 else ("Monitors", "are")
+        raise ToolError(
+            f"{noun} {names} {verb} not in this session. Loaded files are: "
+            f"{sorted(known_files)}. Use one of those keys (they are also returned "
+            "by load_experiment as monitor_keys). Nothing was excluded."
+        )
+
     def sizes_with(extra: set[tuple[str, int]]) -> dict[str, int]:
         excl = session.excluded_set() | extra
         out: dict[str, int] = {}
@@ -396,15 +421,31 @@ def apply_exclusions(
             out[g["labels"]] = out.get(g["labels"], 0) + 1
         return out
 
+    # Counts, so a request that matches no assigned channel reports a zero instead
+    # of an indistinguishable success. Legitimate: the key resolves, but nothing
+    # met the criterion.
+    before = sizes_with(set())
+    after = sizes_with(set(parsed))
+    n_before, n_after = sum(before.values()), sum(after.values())
+    n_excluded = n_before - n_after
+    zero_note = (
+        "" if n_excluded else
+        " NOTE: this matched no assigned channel — n is unchanged. The key is "
+        "valid, but nothing met the criterion (already excluded, or not assigned "
+        "to any group)."
+    )
+
     if not confirm:
         return ExclusionResult(
             session_id=session_id, applied=False,
-            n_by_group=sizes_with(set(parsed)),
+            n_by_group=after,
             excluded=[f"{m}:{c}" for m, c in parsed],
+            n_before=n_before, n_after=n_after, n_excluded=n_excluded,
             reason=reason,
             message=(
-                "Preview only — nothing excluded yet. This changes n as shown. "
-                "Confirm with the user, then call again with confirm=true to apply."
+                f"Preview only — nothing excluded yet. This would exclude "
+                f"{n_excluded} channel(s), n {n_before} -> {n_after}. Confirm with "
+                "the user, then call again with confirm=true to apply." + zero_note
             ),
         ).model_dump()
 
@@ -419,8 +460,10 @@ def apply_exclusions(
         session_id=session_id, applied=True,
         n_by_group=sizes_with(set()),
         excluded=[f"{m}:{c}" for m, c in parsed],
+        n_before=n_before, n_after=n_after, n_excluded=n_excluded,
         reason=reason,
-        message="Exclusions applied and recorded with their reason.",
+        message=(f"Excluded {n_excluded} channel(s); n {n_before} -> {n_after}. "
+                 "Recorded with the reason given." + zero_note),
     ).model_dump()
 
 
@@ -717,7 +760,7 @@ def _parse_exclusion(e) -> tuple[str, int]:
                 f"Exclusion {e!r} needs both 'monitor' and 'channel'. Or use the "
                 "'MonitorFile:channel' string form."
             )
-        return str(e["monitor"]), _to_int(e["channel"], "channel")
+        return os.path.basename(str(e["monitor"])), _to_int(e["channel"], "channel")
     text = str(e)
     if ":" not in text:
         raise ToolError(
@@ -727,7 +770,10 @@ def _parse_exclusion(e) -> tuple[str, int]:
     monitor, ch = text.rsplit(":", 1)
     if not monitor:
         raise ToolError(f"Exclusion '{e}' is missing the monitor filename.")
-    return monitor, _to_int(ch, "channel")
+    # Same normalisation as assign_groups: exclusions are matched against group
+    # rows keyed by filename, so an unnormalised path would match nothing and
+    # silently exclude no one — worse than refusing.
+    return os.path.basename(monitor), _to_int(ch, "channel")
 
 
 def _to_int(value, what: str) -> int:

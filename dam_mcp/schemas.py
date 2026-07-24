@@ -93,6 +93,13 @@ class ExclusionResult(BaseModel):
     applied: bool
     n_by_group: dict[str, int]
     excluded: list[str]
+    # How many assigned channels this call actually removes. A request that matches
+    # nothing reports 0 rather than succeeding silently — the caller can tell
+    # "excluded two flies" from "excluded nobody", which the return value alone
+    # previously could not express.
+    n_before: int = 0
+    n_after: int = 0
+    n_excluded: int = 0
     reason: Optional[str] = None
     message: str
 

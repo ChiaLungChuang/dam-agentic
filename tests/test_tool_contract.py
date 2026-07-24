@@ -112,6 +112,76 @@ async def test_nested_dict_channel_spec_refuses_and_names_the_forms(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_exclusion_accepts_a_full_path_and_actually_excludes(tmp_path, monitor_files):
+    """The same key ambiguity reaches apply_exclusions. Unnormalised, a path there
+    matches no group row, so the exclusion is recorded and silently excludes
+    nobody — a wrong n rather than an error. Normalisation makes it bite."""
+    async with MCPHarness(tmp_path) as h:
+        sid = (await _session(h, monitor_files))["session_id"]
+        await h.call("assign_groups", session_id=sid,
+                     mapping=_mapping("Monitor1.txt", [1, 16], [17, 32]))
+        full = monitor_files[0]
+        r = await h.call("apply_exclusions", session_id=sid,
+                         exclusions=[f"{full}:5"], reason="empty tube", confirm=False)
+        assert not r.is_error, r.text[:200]
+        assert r.data["n_by_group"][MUT] == 15        # ch5 is in 1-16; n actually drops
+        assert r.data["n_by_group"][CTRL] == 16
+
+
+# ── apply_exclusions: an unresolvable key must fail loudly, a zero match must not ──
+#
+# The asymmetry that was the real defect: assign_groups refuses an unresolvable
+# monitor key, apply_exclusions accepted anything and reported success. A typo'd
+# basename, an unloaded monitor and a stale key from an earlier session all
+# excluded nobody and said so cheerfully. Those two situations must stop looking
+# identical: a key that cannot resolve is always a caller mistake; a key that
+# resolves but matches no rows is a legitimate zero.
+
+@pytest.mark.asyncio
+async def test_exclusion_unresolvable_key_raises(tmp_path, monitor_files):
+    async with MCPHarness(tmp_path) as h:
+        sid = (await _session(h, monitor_files))["session_id"]
+        await h.call("assign_groups", session_id=sid,
+                     mapping=_mapping("Monitor1.txt", [1, 16], [17, 32]))
+        r = await h.call("apply_exclusions", session_id=sid,
+                         exclusions=["Monitor9.txt:5"], reason="typo", confirm=False)
+        assert r.is_error
+        assert "is not in this session" in r.text     # same shape as assign_groups
+        assert "Monitor1.txt" in r.text
+        assert "monitor_keys" in r.text
+
+
+@pytest.mark.asyncio
+async def test_exclusion_valid_key_zero_matches_reports_zero(tmp_path, monitor_files):
+    """Monitor2.txt is loaded but has no group rows, so excluding one of its
+    channels legitimately matches nothing. That is a reported zero, not an error
+    and not a silent success."""
+    async with MCPHarness(tmp_path) as h:
+        sid = (await _session(h, monitor_files))["session_id"]
+        await h.call("assign_groups", session_id=sid,
+                     mapping=_mapping("Monitor1.txt", [1, 16], [17, 32]))
+        r = await h.call("apply_exclusions", session_id=sid,
+                         exclusions=["Monitor2.txt:5"], reason="empty", confirm=False)
+        assert not r.is_error, r.text[:200]
+        assert r.data["n_excluded"] == 0
+        assert r.data["n_before"] == r.data["n_after"] == 32
+
+
+@pytest.mark.asyncio
+async def test_exclusion_reports_before_after_and_excluded_counts(tmp_path, monitor_files):
+    async with MCPHarness(tmp_path) as h:
+        sid = (await _session(h, monitor_files))["session_id"]
+        await h.call("assign_groups", session_id=sid,
+                     mapping=_mapping("Monitor1.txt", [1, 16], [17, 32]))
+        r = await h.call("apply_exclusions", session_id=sid,
+                         exclusions=["Monitor1.txt:5", "Monitor1.txt:20"],
+                         reason="empty tubes", confirm=True)
+        assert not r.is_error, r.text[:200]
+        assert (r.data["n_before"], r.data["n_after"], r.data["n_excluded"]) == (32, 30, 2)
+        assert r.data["n_by_group"] == {MUT: 15, CTRL: 15}
+
+
+@pytest.mark.asyncio
 async def test_inverted_mapping_refuses(tmp_path, monitor_files):
     """{monitor: {channels: label}} is the mapping inside out; it must not be
     silently reinterpreted."""
