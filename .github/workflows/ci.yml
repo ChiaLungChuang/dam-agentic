@@ -2,9 +2,22 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  lint:
+    # Its own job: a linter version bump must not be able to hide test results.
+    # ruff is pinned in [dev], so the rule set is the same here and locally.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false      # one version failing must not cancel the others
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
@@ -17,7 +30,6 @@ jobs:
       # real (no key, no network — only the model is faked). If the engine repo is
       # private, replace with a checkout + `pip install -e ../Rtivity-Python`.
       - run: pip install -e ".[dev,engine,agent]"
-      - run: ruff check .
       - run: pytest -v
 
   eval:

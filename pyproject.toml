@@ -21,7 +21,7 @@ dependencies = [
 # editable instead: `pip install -e /path/to/Rtivity-Python`. The engine provides
 # the `modules` package that dam_mcp.engine imports.
 engine = ["rtivity-python @ git+https://github.com/ChiaLungChuang/Rtivity-Python@v0.12.0"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff==0.16.0"]
 agent = [
     "langgraph>=0.2", "langchain-mcp-adapters>=0.1",
     "langchain-anthropic>=0.3",       # --provider anthropic
@@ -39,3 +39,6 @@ asyncio_mode = "strict"
 
 [tool.ruff]
 line-length = 92
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
