@@ -150,6 +150,23 @@ removed), first-time version control, and the Python rewrite with tests and CI.
 Do not write READMEs or docstrings implying original authorship of Rtivity or its
 methods. If a claim can't be verified from the repo, don't write it.
 
+## Deployment constraints
+
+- **TLS behind institutional inspection.** On the current dev machine, outbound
+  HTTPS from Python fails with `CERTIFICATE_VERIFY_FAILED: self-signed certificate
+  in certificate chain` — the internal root CA is in the macOS keychain but not in
+  Python's certifi bundle — while `curl` to the same host succeeds. This breaks
+  *any* LLM provider SDK (Anthropic, Google, …), not just one. The fix is
+  `truststore`: `agent/graph.build_agent` calls `truststore.inject_into_ssl()`
+  before instantiating a real model, verifying against the OS trust store without
+  weakening verification. Never `verify=False`. `pip` itself is unaffected.
+- **Engine resolution.** `rtivity-python` is installed editable from
+  `~/Rtivity-Python`, which shadows the pinned `@v0.12.0` git dependency; both are
+  at v0.12.0 so they agree — confirm with `git -C ~/Rtivity-Python describe --tags`
+  before attributing a result. `pip show rtivity-python` reporting 0.11.0 is the
+  known version-string mismatch (tag bumped, `version=` string not), not a stale
+  install.
+
 ## Layout
 
 ```

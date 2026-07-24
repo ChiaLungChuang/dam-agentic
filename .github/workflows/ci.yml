@@ -13,9 +13,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       # [engine] pulls rtivity-python from git so `modules` is a real import — no
-      # path env var. If the engine repo is private, replace this with a checkout
-      # + `pip install -e ../Rtivity-Python`.
-      - run: pip install -e ".[dev,engine]"
+      # path env var. [agent] pulls langgraph so the fake-model controls run for
+      # real (no key, no network — only the model is faked). If the engine repo is
+      # private, replace with a checkout + `pip install -e ../Rtivity-Python`.
+      - run: pip install -e ".[dev,engine,agent]"
       - run: ruff check .
       - run: pytest -v
 
