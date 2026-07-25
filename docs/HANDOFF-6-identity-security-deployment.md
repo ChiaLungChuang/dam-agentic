@@ -29,6 +29,11 @@ Entra Agent ID (needs a tenant we do not control), and On-Behalf-Of token exchan
 
 ## Phase 0 — Unblock the model path
 
+> **Phase 0 CLOSED** (2026-07-25, commit `9cc4fcc`) — acceptance evidence:
+> [`phase0-eval-report.md`](phase0-eval-report.md). Closed under the revised
+> criterion in [`HANDOFF-6-amendment-1.md`](HANDOFF-6-amendment-1.md) §A, not the
+> one below.
+
 **Why first:** the eval is the project's strongest artifact and it currently cannot
 complete a single real-model run. Everything downstream is more valuable once real
 traces exist.
