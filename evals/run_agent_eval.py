@@ -44,6 +44,7 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.tools import ToolException
 from langgraph.errors import GraphRecursionError
 
+from .limits import RECURSION_LIMIT
 from .scoring import aggregate, format_report
 from .trace import Trace, from_messages
 
@@ -152,7 +153,7 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
         try:
             result = await agent.ainvoke(
                 {"messages": [("user", task.prompt)]},
-                config={"recursion_limit": 12})      # first-run leash (HANDOFF-4 §8)
+                config={"recursion_limit": RECURSION_LIMIT})
         except Exception as exc:
             if not _is_agent_failure(exc):
                 raise EvalAborted(_abort_reason(exc)) from exc

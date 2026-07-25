@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from evals.limits import RECURSION_LIMIT
+
 from .graph import build_agent
 
 
@@ -20,7 +22,7 @@ async def _main(query: str, provider: str, model: str | None) -> int:
     agent = await build_agent(model=model, provider=provider)
     result = await agent.ainvoke(
         {"messages": [("user", query)]},
-        config={"recursion_limit": 12},          # first-run leash
+        config={"recursion_limit": RECURSION_LIMIT},
     )
     for message in result["messages"]:
         role = getattr(message, "type", "?")

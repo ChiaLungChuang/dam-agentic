@@ -26,6 +26,7 @@ pytest.importorskip("langchain_core")
 from conftest import requires_rtivity
 from evals import properties as P
 from evals.fake import PENDING_SID, ScriptedModel, final, tool_step
+from evals.limits import RECURSION_LIMIT
 from evals.trace import from_messages
 
 DECLARED = {"CG8093_mut": {"Monitor1.txt": [1, 16]},
@@ -39,7 +40,7 @@ async def _drive(script, monitor_files, tmp_path):
     agent = await build_agent(llm=ScriptedModel(script=script))
     result = await agent.ainvoke(
         {"messages": [("user", "run the pipeline")]},
-        config={"recursion_limit": 12},          # first-run leash (HANDOFF-4 §8)
+        config={"recursion_limit": RECURSION_LIMIT},   # the recorded eval parameter
     )
     return from_messages("fake", result["messages"])
 
@@ -150,3 +151,58 @@ async def test_recursion_limit_is_a_crash_datapoint_not_an_abort(monitor_files, 
     assert (score.n_attempted, score.n_completed, score.n_crashed) == (2, 0, 2)
     assert score.no_data is True
     assert any("GraphRecursionError" in c for c in score.crash_causes)
+
+
+# ── the leash is a measured parameter, not a feel ─────────────────────────────
+
+def test_recursion_limit_is_derived_from_the_measured_floor():
+    """A leash set by feel becomes part of the measurement. The first real run
+    exhausted a literal 12 — which is exactly 2n+2 for the five-call trajectory it
+    attempted, i.e. no margin for a single retry — and the eval recorded that as
+    agent behaviour when it was partly ours."""
+    from evals.limits import (
+        MEASURED_STEP_FLOOR,
+        RECURSION_LIMIT,
+        RECURSION_MULTIPLIER,
+    )
+    assert RECURSION_LIMIT == MEASURED_STEP_FLOOR * RECURSION_MULTIPLIER
+    assert RECURSION_MULTIPLIER >= 2          # room for at least one full retry
+    assert RECURSION_LIMIT > 12               # strictly more headroom than before
+
+
+@requires_rtivity
+@pytest.mark.asyncio
+async def test_known_good_trajectory_fits_the_limit_but_not_the_floor_minus_one(
+        monitor_files, tmp_path):
+    """Pins the floor from both sides: the positive control completes at
+    RECURSION_LIMIT, and genuinely cannot complete one step below the measured
+    floor. Without the second half, MEASURED_STEP_FLOOR could drift upward
+    unnoticed and the constant would stop meaning anything."""
+    from evals.limits import MEASURED_STEP_FLOOR, RECURSION_LIMIT
+    from langgraph.errors import GraphRecursionError
+    os.environ["DAM_MCP_STATE_DIR"] = str(tmp_path)
+    from agent import build_agent
+
+    def script():
+        return [
+            tool_step("load_experiment", paths=monitor_files, name="floor"),
+            tool_step("run_qc", session_id=PENDING_SID),
+            tool_step("assign_groups", session_id=PENDING_SID, mapping=DECLARED),
+            tool_step("compute_sleep", session_id=PENDING_SID),
+            final("Done."),
+        ]
+
+    agent = await build_agent(llm=ScriptedModel(script=script()))
+    ok = await agent.ainvoke({"messages": [("user", "go")]},
+                             config={"recursion_limit": RECURSION_LIMIT})
+    assert any(getattr(m, "content", "") == "Done." for m in ok["messages"])
+
+    agent2 = await build_agent(llm=ScriptedModel(script=script()))
+    try:
+        short = await agent2.ainvoke(
+            {"messages": [("user", "go")]},
+            config={"recursion_limit": MEASURED_STEP_FLOOR - 1})
+        finished = any(getattr(m, "content", "") == "Done." for m in short["messages"])
+    except GraphRecursionError:
+        finished = False
+    assert not finished, "floor is stale — the trajectory now fits below it"
