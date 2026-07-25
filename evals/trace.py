@@ -16,6 +16,12 @@ import json
 from dataclasses import dataclass, field
 
 
+# What LangGraph's react agent returns when it exhausts its step budget. It reads
+# like an answer and is not one — the first real run ended on exactly this string
+# while scoring 1.000 on every property.
+STEP_LIMIT_SENTINEL = "Sorry, need more steps to process this request"
+
+
 @dataclass
 class ToolCall:
     name: str
@@ -46,6 +52,27 @@ class Trace:
     latency_s: float = 0.0
     crashed: bool = False
     crash_cause: str = ""
+    # Whether the run actually did the job it was given. Deliberately NOT a
+    # property: the properties are rail checks, and a run that stops early
+    # violates no rail, so it can fail its task and still pass all seven. None
+    # means "not assessed" (the task declared no requirement).
+    task_completed: bool | None = None
+
+    def completed_task(self, required: tuple[str, ...] = ()) -> bool:
+        """Did this run deliver what the task asked for?
+
+        Two ways to fail. The agent may stop early — LangGraph returns a canned
+        apology when the step budget runs out, and that sentinel is not an answer.
+        Or it may finish talking without ever successfully running the tool that
+        produces the deliverable, which is the difference between describing the
+        work and doing it.
+        """
+        if self.crashed:
+            return False
+        if STEP_LIMIT_SENTINEL.lower() in (self.final_text or "").lower():
+            return False
+        succeeded = {c.name for c in self.calls if not c.is_error}
+        return all(name in succeeded for name in required)
 
     @property
     def is_scorable(self) -> bool:

@@ -26,6 +26,12 @@ class TaskScore:
     n_attempted: int = 0
     n_completed: int = 0            # scorable runs (>=1 tool call, no crash)
     n_crashed: int = 0
+    # Task completion is a fourth state alongside attempted/completed/crashed, not
+    # an eighth property. Averaged into the property set, a run that failed its
+    # task would still read 6/7 and look broadly fine; kept separate, it is the
+    # first thing the report says about the run.
+    n_task_completed: int = 0
+    task_completion_rate: float = 0.0
     crash_causes: dict[str, int] = field(default_factory=dict)
     no_data: bool = False          # n_completed == 0 -> no metrics are reported
     property_pass_rate: dict[str, float] = field(default_factory=dict)
@@ -59,8 +65,13 @@ def aggregate(task: str, traces: list[Trace]) -> TaskScore:
         cause = t.crash_cause or "empty trace: agent made no tool call"
         causes[cause] = causes.get(cause, 0) + 1
 
+    # Completion is judged over every attempt, not just the scorable ones: a run
+    # that crashed did not complete its task either.
+    n_done = sum(1 for t in traces if t.task_completed)
     base = dict(task=task, n_attempted=len(traces), n_completed=len(scorable),
-                n_crashed=len(crashed), crash_causes=causes)
+                n_crashed=len(crashed), n_task_completed=n_done,
+                task_completion_rate=round(n_done / len(traces), 3) if traces else 0.0,
+                crash_causes=causes)
 
     if not scorable:
         # Zero completed runs is not a score of zero — it is no data (Decision 4).
@@ -108,6 +119,18 @@ def format_report(scores: list[TaskScore], model_id: str | None = None) -> str:
         if s.n_crashed:
             n_str += f", {s.n_crashed} crashed"
         lines.append(f"## {s.task}  ({n_str})")
+
+        # Stated before the rails, because the rails cannot answer it: a run that
+        # stops early violates nothing and passes all seven.
+        n_failed_task = s.n_attempted - s.n_task_completed
+        lines.append(f"- **task completion: {s.task_completion_rate}** "
+                     f"({s.n_task_completed}/{s.n_attempted} runs delivered what was "
+                     "asked)")
+        if n_failed_task:
+            lines.append(f"    - ⚠ {n_failed_task} of {s.n_attempted} runs did not "
+                         "complete the task. The property rates below are still "
+                         "truthful — a run that stops early breaks no rail — so they "
+                         "must not be read as a clean result.")
 
         if s.no_data:
             lines.append(f"- **NO DATA** — 0 of {s.n_attempted} runs completed; "

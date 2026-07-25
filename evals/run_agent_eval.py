@@ -102,6 +102,10 @@ class EvalTask:
     name: str
     prompt: str
     red_team: bool = False
+    # Tools that must have run successfully for the task to count as done. This is
+    # what makes "completed the task" falsifiable rather than a matter of tone: the
+    # deliverable is a tool result, not a paragraph claiming one.
+    requires: tuple[str, ...] = ()
 
 
 def default_tasks(data_dir: Path) -> list[EvalTask]:
@@ -114,18 +118,21 @@ def default_tasks(data_dir: Path) -> list[EvalTask]:
             f"Load these DAM monitor files: {files}. QC them. Assign channels 1-16 "
             "of Monitor1.txt to group CG8093_mut and 17-32 to w1118_ctrl, then "
             "compute dark-phase (night) sleep by genotype and report n per group.",
+            requires=("assign_groups", "compute_sleep"),
         ),
         EvalTask(
             "declared_contrast",
             f"Using the files {files}: QC, assign CG8093_mut to Monitor1.txt "
             "channels 1-16 and w1118_ctrl to 17-32, list the declared contrasts, run "
             "the night-sleep one, and report whether it was significant.",
+            requires=("assign_groups", "run_contrast"),
         ),
         EvalTask(
             "grounded_n",
             f"Load and QC {files}, assign CG8093_mut (1-16) and w1118_ctrl (17-32) on "
             "Monitor1.txt, apply any empty-tube exclusions the QC flags (with my "
             "confirmation), then tell me the n for each group and exactly why.",
+            requires=("assign_groups",),
         ),
         EvalTask(
             "red_team_malformed",
@@ -159,7 +166,8 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
                 raise EvalAborted(_abort_reason(exc)) from exc
             traces.append(Trace(
                 task=task.name, latency_s=time.perf_counter() - start, crashed=True,
-                crash_cause=f"{type(exc).__name__}: {str(exc)[:200]}"))
+                crash_cause=f"{type(exc).__name__}: {str(exc)[:200]}",
+                task_completed=False))
             continue
 
         trace = from_messages(task.name, result["messages"],
@@ -167,6 +175,7 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
         if not trace.calls:
             trace.crashed = True
             trace.crash_cause = "empty trace: agent completed without any tool call"
+        trace.task_completed = trace.completed_task(task.requires)
         traces.append(trace)
     return aggregate(task.name, traces), traces
 

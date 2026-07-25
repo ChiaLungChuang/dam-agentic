@@ -180,3 +180,64 @@ def test_aggregate_counts_crashes_and_refuses_to_score_zero():
     report = format_report([none_done])
     assert "NO DATA" in report and "RateLimit" in report   # cause surfaced, no metrics
     assert "tool-sequence accuracy" not in report
+
+
+# ── task completion: a fourth state, deliberately NOT an eighth property ──────
+#
+# The first real run failed its task -- two errored assign_groups calls, step-limit
+# exhaustion, final text "Sorry, need more steps to process this request." -- and
+# scored 1.000 on all seven properties. The properties were not wrong: they are
+# rail checks, and a run that stops early violates no rail. The report was wrong,
+# because nothing in it distinguished that run from one that did the work.
+#
+# Completion is tracked alongside n_attempted/n_completed/n_crashed rather than
+# averaged into the property set, where a failed task would still read as 6/7.
+
+def test_step_limit_sentinel_is_not_task_completion():
+    from evals.trace import STEP_LIMIT_SENTINEL, Trace
+    tr = Trace(task="t", calls=[_call("load_experiment"), _call("run_qc")],
+               final_text=STEP_LIMIT_SENTINEL)
+    assert tr.completed_task(required=("run_qc",)) is False
+
+
+def test_required_tool_must_have_succeeded():
+    from evals.trace import Trace
+    ran = Trace(task="t", calls=[_call("load_experiment"), _call("compute_sleep")],
+                final_text="Night sleep was computed for both genotypes.")
+    assert ran.completed_task(required=("compute_sleep",)) is True
+
+    errored = Trace(task="t", calls=[_call("compute_sleep", is_error=True)],
+                    final_text="I could not compute it.")
+    assert errored.completed_task(required=("compute_sleep",)) is False
+
+    missing = Trace(task="t", calls=[_call("load_experiment")],
+                    final_text="Loaded the files.")
+    assert missing.completed_task(required=("compute_sleep",)) is False
+
+
+def test_completion_is_a_separate_state_not_a_property():
+    """The load-bearing distinction: completion must not be averaged in with the
+    rails. If it were a property, a run that failed its task would still score
+    6/7 and read as broadly fine."""
+    from evals.properties import STRUCTURAL
+    names = {p.__name__ for p in STRUCTURAL}
+    assert not any("complet" in n for n in names)
+
+
+def test_failed_task_is_visible_in_the_report_despite_perfect_rails():
+    from evals.trace import STEP_LIMIT_SENTINEL
+    good = _good_trace()
+    good.task_completed = True
+    stalled = _good_trace()                       # every rail still passes...
+    stalled.final_text = STEP_LIMIT_SENTINEL      # ...but the task was not done
+    stalled.task_completed = False
+
+    score = aggregate("qc+sleep", [good, stalled])
+    assert score.n_task_completed == 1
+    assert score.task_completion_rate == 0.5
+    report = format_report([score])
+    assert "task completion" in report.lower()
+    # every property still reads 1.0 -- truthfully -- so the report must not let
+    # that be mistaken for a clean result
+    assert all(v == 1.0 for v in score.property_pass_rate.values())
+    assert "1 of 2 runs did not complete" in report or "did not complete" in report
