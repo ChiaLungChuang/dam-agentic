@@ -109,6 +109,15 @@ class WindowResult(BaseModel):
     start: Optional[str] = None
     end: Optional[str] = None
     tally: dict[str, dict[str, int]]       # keyed by monitor -> {state: count}
+    monitors_dropped: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Monitors the window excluded entirely. The tally above covers only the "
+            "monitors that survived, so without this a truncated dataset looks like "
+            "a clean one — and everything downstream (grouping, exclusions, metrics, "
+            "contrasts) would run on it silently."
+        ),
+    )
     decisions_required: list[str]
     message: str
 

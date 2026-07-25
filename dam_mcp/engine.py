@@ -268,6 +268,9 @@ def qc_tally_and_decisions(qc: dict) -> dict:
         "inventory": qc.get("inventory", []),
         "alignment": qc.get("alignment", {}),
         "unparseable_files": qc.get("unparseable_files", []),
+        # Monitors the analysis window excluded entirely — a truncated dataset the
+        # caller must be told about, distinct from a file that would not parse.
+        "window_dropped": qc.get("window_dropped", []),
     }
 
 

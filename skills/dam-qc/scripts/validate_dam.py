@@ -252,14 +252,21 @@ def main():
     # Analysis window: applied before classification so that death is judged WITHIN
     # the window. A fly that dies after the window end is valid data inside it — which
     # is why the window is chosen before any exclusion, not after.
+    # A monitor left with too few reads by the window is NOT unparseable — the file
+    # is fine, it simply does not overlap the window. Tracked separately so the
+    # caller can tell "this file is broken" from "your window excluded this file",
+    # which are different problems with different fixes.
+    window_dropped = []
     if win_start or win_end:
         kept = []
         for m in monitors:
             m["rows"] = [r for r in m["rows"]
                          if (win_start is None or r["ts"] >= win_start)
                          and (win_end is None or r["ts"] <= win_end)]
-            (kept if len(m["rows"]) >= 2 else failed).append(
-                m if len(m["rows"]) >= 2 else m["path"])
+            if len(m["rows"]) >= 2:
+                kept.append(m)
+            else:
+                window_dropped.append(Path(m["path"]).name)
         monitors = kept
 
     if not monitors:
@@ -269,7 +276,8 @@ def main():
     pre = [inventory(m) for m in monitors]
     alignment = align(monitors)
 
-    report = {"unparseable_files": failed, "inventory": pre, "alignment": alignment,
+    report = {"unparseable_files": failed, "window_dropped": sorted(window_dropped),
+              "inventory": pre, "alignment": alignment,
               "analysis_window": {
                   "start": win_start.isoformat() if win_start else None,
                   "end": win_end.isoformat() if win_end else None},

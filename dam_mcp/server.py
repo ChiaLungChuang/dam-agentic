@@ -249,14 +249,23 @@ def set_analysis_window(
     session.window = window
     session.qc[str(death_hours)] = shaped
     STORE.save(session)
+    dropped = shaped.get("window_dropped", [])
+    drop_note = (
+        "" if not dropped else
+        f" WARNING: this window excluded {len(dropped)} monitor(s) entirely "
+        f"({', '.join(dropped)}). The tally below covers only what survived — every "
+        "later step runs on this reduced dataset. Widen the window if that was not "
+        "intended."
+    )
     return WindowResult(
         session_id=session_id,
         start=start,
         end=end,
         tally=shaped["tally"],
+        monitors_dropped=dropped,
         decisions_required=shaped["decisions_required"],
         message="Window set and QC re-run within it. Now review decisions_required "
-                "and apply exclusions.",
+                "and apply exclusions." + drop_note,
     ).model_dump()
 
 
