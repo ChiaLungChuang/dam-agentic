@@ -128,8 +128,8 @@ async def build_agent(model: str | None = None, provider: str = "anthropic", llm
     injects a ready-made model and bypasses provider logic entirely (used by the
     fake-model tests). temperature=0 on every real provider.
     """
+    from langchain.agents import create_agent
     from langchain_mcp_adapters.client import MultiServerMCPClient
-    from langgraph.prebuilt import create_react_agent
 
     if llm is None:
         _inject_truststore()
@@ -137,4 +137,7 @@ async def build_agent(model: str | None = None, provider: str = "anthropic", llm
 
     client = MultiServerMCPClient({"dam": _server_spec()})
     tools = await client.get_tools()
-    return create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
+    # langgraph.prebuilt.create_react_agent moved to langchain.agents.create_agent
+    # in LangGraph v1.0 (deprecated, removed in v2.0). The keyword changed too:
+    # prompt= -> system_prompt=.
+    return create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
