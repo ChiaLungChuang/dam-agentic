@@ -44,15 +44,24 @@ def resolved_model(provider: str, model: str | None) -> str:
     return model or DEFAULT_MODELS.get(provider, "unknown")
 
 
-def _server_spec() -> dict:
+def _server_spec(env_extra: dict | None = None) -> dict:
     """stdio launch spec for the dam_mcp server. The server inherits
     RTIVITY_PYTHON_PATH and DAM_MCP_STATE_DIR from this process, so agent and
-    server share session state and the same analysis engine."""
+    server share session state and the same analysis engine.
+
+    ``env_extra`` is merged into the child's environment only — the eval passes
+    DAM_RUN_ID this way so the server stamps every audit line with the run that
+    caused it. Deliberately not ``os.environ[...] = ...`` in this process: the
+    test suite runs the instrumented server in-process, so a leaked value would
+    stamp unrelated audit lines in whichever test happened to run next."""
+    env = dict(os.environ)
+    if env_extra:
+        env.update({k: str(v) for k, v in env_extra.items()})
     return {
         "command": sys.executable,
         "args": ["-m", "dam_mcp.server"],
         "transport": "stdio",
-        "env": dict(os.environ),
+        "env": env,
     }
 
 
@@ -121,12 +130,17 @@ def make_llm(provider: str, model: str | None):
     )
 
 
-async def build_agent(model: str | None = None, provider: str = "anthropic", llm=None):
+async def build_agent(model: str | None = None, provider: str = "anthropic", llm=None,
+                      env_extra: dict | None = None):
     """Construct the ReAct agent and its MCP tools over stdio.
 
     `provider` selects the model family; `model` overrides the default id; `llm`
     injects a ready-made model and bypasses provider logic entirely (used by the
     fake-model tests). temperature=0 on every real provider.
+
+    `env_extra` is passed through to the server subprocess's environment (see
+    `_server_spec`). The eval uses it for DAM_RUN_ID, so every audit line the
+    server writes names the run that caused it.
     """
     from langchain.agents import create_agent
     from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -135,7 +149,7 @@ async def build_agent(model: str | None = None, provider: str = "anthropic", llm
         _inject_truststore()
         llm = make_llm(provider, model)
 
-    client = MultiServerMCPClient({"dam": _server_spec()})
+    client = MultiServerMCPClient({"dam": _server_spec(env_extra=env_extra)})
     tools = await client.get_tools()
     # langgraph.prebuilt.create_react_agent moved to langchain.agents.create_agent
     # in LangGraph v1.0 (deprecated, removed in v2.0). The keyword changed too:

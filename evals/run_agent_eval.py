@@ -38,6 +38,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.exceptions import OutputParserException
@@ -145,8 +146,27 @@ def default_tasks(data_dir: Path) -> list[EvalTask]:
     ]
 
 
+def _run_stamp() -> str:
+    """A UTC minute-stamp shared by every run of one eval invocation.
+
+    tz-aware on purpose. Audit records are tz-aware UTC (an audit event is a fact
+    about the server, not experimental time — the naive-datetime domain rule for
+    TriKinetics data must not leak here), so a naive stamp would label those
+    records with a local-offset hour and read as a different time than the lines
+    it names."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _mint_run_id(task_name: str, stamp: str, index: int) -> str:
+    """The label a reviewer greps audit.jsonl by. Names the task and the run so a
+    block of lines is identifiable without a second artifact to join against.
+
+    Opaque to the server, which never parses it — the shape is for humans."""
+    return f"eval-{stamp}-{task_name}-r{index}"
+
+
 async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
-                   llm=None):
+                   llm=None, stamp: str | None = None):
     """Run one task `runs` times. An infrastructure failure raises EvalAborted (the
     caller aborts the whole eval). An agent-behaviour failure, or a completed run
     that made no tool call, becomes a recorded crash — counted, never scored.
@@ -163,15 +183,24 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
     from agent import build_agent
 
     traces = []
+    stamp = stamp or _run_stamp()
     tracer = observability.get_tracer()
     with tracer.start_as_current_span("dam.eval.task") as task_span:
         task_span.set_attribute("dam.eval.task", task.name)
         task_span.set_attribute("dam.eval.runs", runs)
-        for _ in range(runs):
-            agent = await build_agent(model=model, provider=provider, llm=llm)
+        for index in range(runs):
+            # Minted before build_agent, so the server subprocess has the id at
+            # spawn and every call it serves is stamped — including the calls a
+            # run makes before it aborts. The abort branch below raises before any
+            # Trace exists, so an id derived from the Trace would leave exactly
+            # those runs unattributable.
+            run_id = _mint_run_id(task.name, stamp, index)
+            agent = await build_agent(model=model, provider=provider, llm=llm,
+                                      env_extra={"DAM_RUN_ID": run_id})
             start = time.perf_counter()
             with tracer.start_as_current_span("dam.agent.run") as run_span:
                 run_span.set_attribute("dam.eval.task", task.name)
+                run_span.set_attribute("dam.run_id", run_id)
                 try:
                     result = await agent.ainvoke(
                         {"messages": [("user", task.prompt)]},
@@ -263,9 +292,18 @@ async def _main(args) -> int:
 
     tasks = default_tasks(data_dir)
     scores = []
+    # One stamp for the whole invocation, so every run id from this eval shares a
+    # prefix and a reviewer can select the lot with a single grep. The audit path
+    # is printed because the commonest way to conclude "the run ids did nothing"
+    # is to grep the default location out of habit while the run wrote elsewhere.
+    stamp = _run_stamp()
+    from dam_mcp import audit
+    print(f"run ids: eval-{stamp}-<task>-r<n>   audit log: "
+          f"{audit.resolve_audit_path()}", file=sys.stderr)
     for task in tasks:
         print(f"running {task.name} x{args.runs} [{model_id}] ...", file=sys.stderr)
-        score, traces = await run_task(task, args.runs, args.model, args.provider)
+        score, traces = await run_task(task, args.runs, args.model, args.provider,
+                                       stamp=stamp)
         if args.judge:
             grades = [await judge_report(t.final_text, args.model, args.provider)
                       for t in traces]
