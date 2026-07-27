@@ -79,6 +79,39 @@ Both halves are gone.
    only that the template refuses to load. A test that goes red because a
    scientist declared their actual experiment is testing the wrong thing.
 
+### Why grouping requires a declared contrast set
+
+The one refusal that looks like overreach, so it is worth writing down before
+someone "fixes" it.
+
+With no contrast set in effect, `assign_groups` refuses — and grouping does not
+depend on contrasts in any conceptual sense. You could reasonably assign channels
+to genotypes and never run a comparison at all.
+
+It refuses because `_check_contrast_labels` validates the labels you assign against
+the union of labels the declared contrasts name, and **that check is the thing that
+stops a pre-registered contrast from pointing at a group with no animals in it.**
+Without a contrast set there is nothing to check against, and the check is the
+whole reason the coupling exists: a contrast id that is legal at load time but
+resolves to an empty arm at run time is a config/session mismatch that surfaces as
+a confusing "no animals with a value" error deep in the engine, long after the
+grouping decision that caused it.
+
+Two consequences follow, both intended:
+
+* **The gate is upstream of everything.** Every `compute_*` tool requires groups,
+  so in practice the pipeline runs as far as QC and then halts until a real
+  contrast file exists. Loading and QC still work — see the table in
+  `docs/running.md`.
+* **The refusal had to stop being best-effort.** `_check_contrast_labels` used to
+  swallow a `ToolError` so an unreadable config never blocked assignment. That was
+  defensible when the config always existed; with no default it would mean the gate
+  silently disappears in exactly the case where nothing is pre-registered.
+
+If this coupling is ever loosened, the thing to preserve is the check, not the
+timing: it can move later, but it cannot become optional without reopening the
+config/session mismatch it was written for.
+
 ### The layout this enables
 
 ```
