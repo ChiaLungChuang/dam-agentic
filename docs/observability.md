@@ -56,6 +56,7 @@ rule must not leak into telemetry.)
 | `DAM_MCP_AUDIT_LOG` | path to the audit JSONL | `<state_dir>/audit.jsonl` |
 | `DAM_MCP_STATE_DIR` | where sessions + the default audit log live | `~/.dam_mcp/sessions` |
 | `DAM_PRINCIPAL` | recorded principal (placeholder until Phase 3) | `anonymous` |
+| `DAM_RUN_ID` | recorded run id — which run these lines belong to | `unattributed` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | send spans here (OTLP/HTTP) | unset |
 | `DAM_TELEMETRY=console` | print spans to **stderr** (for a quick look) | unset |
 
@@ -82,16 +83,71 @@ python -m evals.run_agent_eval --synthetic --runs 1 --provider google
 The audit log is just a file:
 
 ```bash
-jq -c '{tool, outcome, data_files, principal}' /tmp/dam-eval/audit.jsonl
+jq -c '{tool, outcome, data_files, principal, run_id}' /tmp/dam-eval/audit.jsonl
 ```
+
+## Run attribution — which run produced these lines
+
+Audit records are keyed by session, and sessions are named by whatever label the
+agent improvised, so `session_id` alone cannot tie a block of lines back to an
+eval run. Every record and every `dam.tool.*` span therefore also carries
+**`run_id`**.
+
+```bash
+# everything one run did, in order
+jq -c 'select(.run_id == "eval-20260727T101500Z-qc_then_sleep-r0")' audit.jsonl
+
+# everything one eval invocation did — all tasks, all runs share the stamp
+jq -c 'select(.run_id | startswith("eval-20260727T101500Z-"))' audit.jsonl
+
+# which runs touched a given monitor file
+jq -r 'select(.data_files[]? | contains("Monitor3.txt")) | .run_id' audit.jsonl | sort -u
+```
+
+The eval prints the id pattern and the resolved audit path to stderr when it
+starts, because the commonest way to conclude this did nothing is to grep the
+default location out of habit while the run wrote elsewhere.
+
+**Stamped server-side, not reconstructed caller-side.** That direction is forced:
+`run_task`'s crash branch appends a `Trace` with no tool calls at all, and its
+abort branch raises before any `Trace` exists — so anything harvested from the
+agent's output is empty for precisely the runs someone opens `audit.jsonl` to
+investigate. `load_experiment`'s `session_id` is also null by construction (that
+call mints the id), and refused calls can carry stale handles. A session-keyed
+join fails on all three interesting line classes.
+
+**How the id travels.** The eval mints one per run *before* building the agent,
+and passes it through the stdio launch spec (`build_agent(env_extra=...)` →
+`_server_spec`), so the server has it at spawn and every call it serves is
+stamped — including calls made before an abort. It is merged into the child's
+environment only; setting `os.environ` in the parent would leak into the
+in-process server the test suite drives elsewhere and stamp unrelated lines.
+
+**It is not a tool argument, by design.** The model can neither see nor set it, so
+it cannot label its own audit trail. Any caller can scope a block of lines with no
+eval involved at all:
+
+```bash
+DAM_RUN_ID=hand-check-2026-07-27 python -m dam_mcp.server
+```
+
+Unset means `unattributed` — an explicit placeholder, never a blank, which would
+read as a value. `run_id` is opaque to the server: caller-asserted, never parsed,
+never a path component, and orthogonal to `principal` (Phase 3 fills that one;
+this is not an identity claim).
+
+**What it does not solve.** `load_experiment`'s audit `session_id` is still null.
+`run_id` makes that line attributable to a run; it does not make it joinable to
+the session that call created. Separate, still open.
 
 ## Cross-process correlation — the honest limit
 
 When the agent drives the server over stdio, the two span sources live in **two
 processes**: `dam.agent.run` in the eval process, `dam.tool.*` in the server
 subprocess. Both export to the same collector (the subprocess inherits the env), and
-both carry `dam.session_id`, so a collector can **join tool calls to their run by
-session id**. They do *not* yet share a single W3C trace context — true parent/child
+both carry `dam.session_id` **and `dam.run_id`**, so a collector can join tool calls
+to their run on either — `dam.run_id` is the reliable one, for the reasons above.
+They do *not* yet share a single W3C trace context — true parent/child
 nesting across the stdio boundary needs `traceparent` propagation through the MCP
 call, which the client/adapter does not currently expose a hook for. The seam is left
 open for it; it is not built. Within a single process (e.g. the acceptance demo, or a

@@ -115,6 +115,82 @@ def test_instrumentation_is_idempotent(mini):
     assert mcp._tool_manager.call_tool is before      # not re-wrapped
 
 
+# ── run attribution (HANDOFF-8) ───────────────────────────────────────────────
+#
+# DAM_RUN_ID is handed to the server out of band by whoever launched it, and
+# stamped on every line. This is where run_id first carries a real value: before
+# this the field existed and always read "unattributed".
+
+
+@pytest.mark.asyncio
+async def test_run_id_from_the_environment_is_stamped(mini, monkeypatch):
+    monkeypatch.setenv("DAM_RUN_ID", "eval-20260727T101500Z-r0")
+    mcp, log_path = mini
+    await mcp.call_tool("ok_tool", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["run_id"] == "eval-20260727T101500Z-r0"
+
+
+@pytest.mark.asyncio
+async def test_run_id_is_stamped_on_refused_and_errored_calls_too(mini, monkeypatch):
+    """The runs a reviewer opens audit.jsonl for are the ones that went wrong. A
+    stamp present only on the happy path attributes the lines that need it least."""
+    monkeypatch.setenv("DAM_RUN_ID", "eval-r7")
+    mcp, log_path = mini
+    for tool in ("refuse_tool", "boom_tool"):
+        with pytest.raises(Exception):
+            await mcp.call_tool(tool, {"session_id": "dam-1"})
+    recs = audit.read_audit(log_path)
+    assert [r["outcome"] for r in recs] == ["refused", "error"]
+    assert {r["run_id"] for r in recs} == {"eval-r7"}
+
+
+@pytest.mark.asyncio
+async def test_run_id_is_read_per_call_not_cached(mini, monkeypatch):
+    """A resolver cached at import or in instrument_tool_dispatch's body is
+    indistinguishable from correct in production — a subprocess's environment
+    never changes after exec — so it would ship and look right indefinitely. Only
+    an in-process change between two calls discriminates it."""
+    mcp, log_path = mini
+    monkeypatch.setenv("DAM_RUN_ID", "run-A")
+    await mcp.call_tool("ok_tool", {"session_id": "dam-1"})
+    monkeypatch.setenv("DAM_RUN_ID", "run-B")
+    await mcp.call_tool("ok_tool", {"session_id": "dam-1"})
+    assert [r["run_id"] for r in audit.read_audit(log_path)] == ["run-A", "run-B"]
+
+
+@pytest.mark.asyncio
+async def test_unset_run_id_records_the_placeholder(mini, monkeypatch):
+    """A human running the stdio server in Claude Code sets nothing. Those lines
+    must say 'unattributed', not blank — blank reads as a value."""
+    monkeypatch.delenv("DAM_RUN_ID", raising=False)
+    mcp, log_path = mini
+    await mcp.call_tool("ok_tool", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["run_id"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_span_carries_the_run_id(mini, spans, monkeypatch):
+    monkeypatch.setenv("DAM_RUN_ID", "eval-span-r1")
+    mcp, _ = mini
+    await mcp.call_tool("ok_tool", {"session_id": "dam-1"})
+    (span,) = [s for s in spans.get_finished_spans() if s.name == "dam.tool.ok_tool"]
+    assert span.attributes["dam.run_id"] == "eval-span-r1"
+
+
+def test_run_id_is_never_a_tool_parameter(mini):
+    """Forward guard (does NOT fail on revert). The run id arrives out of band
+    precisely so the model can neither see nor set it: a tool argument would let
+    the agent label its own audit trail. It also keeps the instrumentation off the
+    signatures FastMCP introspects to build its JSON schemas, which is why the
+    seam is _tool_manager.call_tool and not a per-tool decorator."""
+    mcp, _ = mini
+    for tool in mcp._tool_manager.list_tools():
+        assert "run_id" not in (tool.parameters.get("properties") or {}), (
+            f"{tool.name} exposes run_id as a parameter")
+
+
 # ── spans (needs opentelemetry; the `spans` fixture importorskips it) ──────────
 
 @pytest.mark.asyncio
