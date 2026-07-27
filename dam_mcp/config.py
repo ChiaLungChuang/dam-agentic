@@ -9,11 +9,12 @@ model is allowed to pick one.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .errors import ToolError
 
-_CONFIG_PATH = (
+DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parent.parent / "config" / "contrasts.yaml"
 )
 
@@ -21,18 +22,37 @@ _REQUIRED_KEYS = {"id", "metric", "phase", "groups"}
 
 
 def config_path() -> Path:
-    return _CONFIG_PATH
+    """Which pre-registered set is in effect: DAM_CONTRASTS_PATH if set, else the
+    repo's config/contrasts.yaml.
+
+    One server commonly serves several experiments — a young / middle / old
+    timepoint series is one pre-registration each — and the alternative to this is
+    overwriting one file in place, where nothing records which set was live for a
+    given run. That is the failure this repo keeps finding: an operation that
+    silently used the wrong input and reported success. list_contrasts returns the
+    resolved path for the same reason.
+
+    Read per call, never frozen at import: a captured path is indistinguishable
+    from correct in a single-experiment process and wrong the moment a second set
+    is used. `or` rather than a get() default, so an empty value from a launch spec
+    built off a maybe-None falls back instead of resolving to Path('')."""
+    env = os.environ.get("DAM_CONTRASTS_PATH")
+    if env:
+        return Path(env)
+    return DEFAULT_CONFIG_PATH
 
 
 def load_config(path: Path | None = None) -> dict:
     """Parse contrasts.yaml into a dict. Raises ToolError (errors-as-prompts) on a
     missing file, missing PyYAML, or a malformed contrast declaration."""
-    path = path or _CONFIG_PATH
+    path = path or config_path()
     if not path.exists():
         raise ToolError(
             f"No contrast config at {path}. Contrasts must be declared before the "
-            "data is seen — create config/contrasts.yaml with the pre-registered "
-            "comparisons (see the example in the repo)."
+            "data is seen — create that file with the pre-registered comparisons "
+            "(see the example in the repo). If that is not the set you meant, "
+            "check DAM_CONTRASTS_PATH: it overrides the default location and is "
+            f"currently {os.environ.get('DAM_CONTRASTS_PATH') or 'unset'}."
         )
     try:
         import yaml

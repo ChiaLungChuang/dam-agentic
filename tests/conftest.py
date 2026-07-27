@@ -16,6 +16,20 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+FIXTURE_CONTRASTS = Path(__file__).resolve().parent / "fixtures" / "contrasts.yaml"
+
+
+# The contrast set is a scientific artifact belonging to whoever runs this server,
+# not a test fixture. Before DAM_CONTRASTS_PATH existed the suite read the live
+# config/contrasts.yaml directly, so replacing the EXAMPLE stub with a real
+# pre-registration turned ten tests red — the suite was pinned to one lab's
+# groups. Point every test at a fixture instead; the live file gets exactly one
+# test of its own (test_config.py::test_the_repos_own_contrast_file_parses), which
+# checks that it parses without caring what is in it.
+@pytest.fixture(autouse=True)
+def _pin_contrasts_to_fixture(monkeypatch):
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(FIXTURE_CONTRASTS))
+
 
 # Session-scoped: the synthetic monitor files are read-only, so generating them
 # once and sharing them across the whole run turns a ~2.5 min suite (a fresh
