@@ -66,6 +66,26 @@ def _tracer():
     return trace.get_tracer("dam_mcp")
 
 
+def get_tracer():
+    """The dam tracer — a real one if OpenTelemetry is installed, else a no-op that
+    supports the same span context-manager surface. For callers outside this module
+    (the eval loop) that want to open their own spans."""
+    return _tracer()
+
+
+def mark_span(span, outcome: str, message: str | None = None) -> None:
+    """Set span status from a taxonomy outcome. The success outcomes — ``ok`` (a
+    tool did its job) and ``completed`` (a run finished) — are OK; everything else
+    (``refused`` aside, which the dispatch wrapper handles specially) is a failure
+    and carries the message. ``crashed`` (agent behaviour) and ``aborted``
+    (infrastructure) are both ERROR here; the ``dam.eval.outcome`` attribute keeps
+    them distinct, mirroring HANDOFF-5's two-way split."""
+    if outcome in ("ok", "completed"):
+        _status_ok(span)
+    else:
+        _status_error(span, message)
+
+
 def _status_ok(span) -> None:
     try:
         from opentelemetry.trace import Status, StatusCode
