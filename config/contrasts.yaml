@@ -1,3 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  TEMPLATE — NOT A PRE-REGISTRATION.
+#
+#  Every label below is a placeholder (geneA / control / EtOH / RU). No real
+#  experiment is declared here, and nothing in this file has been pre-registered
+#  by anyone. It exists to show the shape of a full metric x phase crossing and
+#  the rationale conventions — copy it, do not run it.
+#
+#  To pre-register a real experiment: copy this file to
+#  config/contrasts-<experiment>.yaml, replace the labels and the experiment
+#  field with the real ones, and point the server at it:
+#
+#      DAM_CONTRASTS_PATH=config/contrasts-myexp.yaml python -m dam_mcp.server
+#
+#  Commit that file BEFORE the data is analysed — the commit is the
+#  pre-registration timestamp, and it is the only part of this gate that a
+#  reviewer can check independently.
+# ═══════════════════════════════════════════════════════════════════════════
+#
 # Pre-declared contrast set.
 #
 # The agent reads this file and may run any contrast in it. It cannot write to it
@@ -7,16 +26,17 @@
 #
 # Add contrasts here BEFORE looking at the data.
 #
-# PRIMARY ENDPOINT: gene_effect_total_sleep_dark
-# Every other entry is secondary and exploratory. No multiplicity correction is
-# applied anywhere in this pipeline — run_contrast returns a raw p-value per
-# contrast and the server does not adjust across the declared set.
+# The primary/secondary split below is likewise illustrative. In a real set,
+# PRIMARY ENDPOINT marks the one comparison the experiment was powered for.
+# No multiplicity correction is applied anywhere in this pipeline — run_contrast
+# returns a raw p-value per contrast and the server does not adjust across the
+# declared set.
 
-experiment: geneA-geneswitch-young-2026-07
+experiment: TEMPLATE_replace_me   # e.g. geneA-geneswitch-young-2026-07
 
-# Group labels referenced by the contrasts below. These must appear verbatim as
-# keys in the mapping passed to assign_groups; channel ranges are supplied there
-# by the human at call time and are NOT read from this file.
+# PLACEHOLDER group labels. These must appear verbatim as keys in the mapping
+# passed to assign_groups; channel ranges are supplied there by the human at call
+# time and are NOT read from this file.
 groups:
   - geneA_EtOH
   - geneA_RU
@@ -37,7 +57,8 @@ contrasts:
     phase: dark
     groups: [geneA_RU, geneA_EtOH]
     test: wilcoxon
-    rationale: PRIMARY ENDPOINT.
+    rationale: PRIMARY ENDPOINT (illustrative — this template pre-registers
+      nothing).
 
   - id: gene_effect_mean_bout_duration_light
     metric: mean_bout_duration
