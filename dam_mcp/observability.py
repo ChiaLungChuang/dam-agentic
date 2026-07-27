@@ -104,46 +104,56 @@ def _status_error(span, message: str | None) -> None:
 
 # ── default provider wiring for the entrypoints ────────────────────────────────
 
+def _select_exporter():
+    """Choose a span exporter + processor from the environment, in priority order:
+
+      * ``OTEL_EXPORTER_OTLP_ENDPOINT`` set → OTLP/HTTP to that collector (Phoenix,
+        the OpenTelemetry Collector, Langfuse), batched.
+      * ``DAM_TELEMETRY=console``           → spans printed to **stderr** (never
+        stdout — inside the stdio MCP server subprocess stdout carries the JSON-RPC
+        stream, and a span written there would corrupt the protocol), immediately.
+      * neither                             → ``None``: no exporter, so the offline
+        default installs no provider and sends nothing off the machine. The
+        private-inference path depends on this being the do-nothing default.
+
+    Returns ``(exporter, processor_cls)`` or ``None``. Separated from provider
+    installation so the decision is unit-testable without mutating the process-wide
+    tracer provider (which can only be set once)."""
+    from opentelemetry.sdk.trace.export import (
+        BatchSpanProcessor,
+        ConsoleSpanExporter,
+        SimpleSpanProcessor,
+    )
+    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        return OTLPSpanExporter(), BatchSpanProcessor
+    if os.environ.get("DAM_TELEMETRY", "").lower() == "console":
+        import sys
+        return ConsoleSpanExporter(out=sys.stderr), SimpleSpanProcessor
+    return None
+
+
 def configure_default_tracing(service_name: str = "dam-mcp"):
     """Install an SDK tracer provider from the environment, once. Called by the
-    server ``__main__`` and the eval entrypoint.
-
-    Export target, in priority order:
-      * ``OTEL_EXPORTER_OTLP_ENDPOINT`` set  → OTLP/HTTP to that collector (Phoenix,
-        the OpenTelemetry Collector, Langfuse), batched.
-      * ``DAM_TELEMETRY=console``            → spans printed to stderr, immediately.
-      * neither                              → **no provider installed**: the API's
-        no-op tracer stays in place, so the offline default costs nothing and sends
-        nothing off the machine. This matters for the private-inference path.
-
-    Never clobbers a provider a caller (e.g. a test) already installed.
-    """
+    server ``__main__`` and the eval entrypoint. Never clobbers a provider a caller
+    (e.g. a test) already installed, and is a no-op when export is not requested
+    (see ``_select_exporter``) or when OpenTelemetry is not installed."""
     try:
         from opentelemetry import trace
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import (
-            BatchSpanProcessor,
-            ConsoleSpanExporter,
-            SimpleSpanProcessor,
-        )
     except ImportError:
         return None
 
     if isinstance(trace.get_tracer_provider(), TracerProvider):
         return trace.get_tracer_provider()          # someone already configured it
 
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-    mode = os.environ.get("DAM_TELEMETRY", "").lower()
-    if endpoint:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-            OTLPSpanExporter,
-        )
-        exporter, processor = OTLPSpanExporter(), BatchSpanProcessor
-    elif mode == "console":
-        exporter, processor = ConsoleSpanExporter(), SimpleSpanProcessor
-    else:
+    selected = _select_exporter()
+    if selected is None:
         return None                                  # offline, no-op
+    exporter, processor = selected
 
     provider = TracerProvider(
         resource=Resource.create({"service.name": service_name}))
