@@ -44,6 +44,8 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.tools import ToolException
 from langgraph.errors import GraphRecursionError
 
+from dam_mcp import observability
+
 from .limits import RECURSION_LIMIT
 from .scoring import aggregate, format_report
 from .trace import Trace, from_messages
@@ -150,33 +152,60 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
     that made no tool call, becomes a recorded crash — counted, never scored.
 
     `llm` injects a model (a fake) so the abort path can be tested without a key.
+
+    Each run is wrapped in a `dam.agent.run` span under a per-task `dam.eval.task`
+    span. The span's `dam.eval.outcome` attribute records completed / crashed /
+    aborted — the run-level shadow of HANDOFF-5's taxonomy — and its status is OK
+    for a completed run, ERROR for a crash or an abort. Task success is a separate
+    axis (`dam.task_completed`): a run can complete, violate no rail, and still fail
+    its task, so task failure does not by itself errored the span.
     """
     from agent import build_agent
 
     traces = []
-    for _ in range(runs):
-        agent = await build_agent(model=model, provider=provider, llm=llm)
-        start = time.perf_counter()
-        try:
-            result = await agent.ainvoke(
-                {"messages": [("user", task.prompt)]},
-                config={"recursion_limit": RECURSION_LIMIT})
-        except Exception as exc:
-            if not _is_agent_failure(exc):
-                raise EvalAborted(_abort_reason(exc)) from exc
-            traces.append(Trace(
-                task=task.name, latency_s=time.perf_counter() - start, crashed=True,
-                crash_cause=f"{type(exc).__name__}: {str(exc)[:200]}",
-                task_completed=False))
-            continue
+    tracer = observability.get_tracer()
+    with tracer.start_as_current_span("dam.eval.task") as task_span:
+        task_span.set_attribute("dam.eval.task", task.name)
+        task_span.set_attribute("dam.eval.runs", runs)
+        for _ in range(runs):
+            agent = await build_agent(model=model, provider=provider, llm=llm)
+            start = time.perf_counter()
+            with tracer.start_as_current_span("dam.agent.run") as run_span:
+                run_span.set_attribute("dam.eval.task", task.name)
+                try:
+                    result = await agent.ainvoke(
+                        {"messages": [("user", task.prompt)]},
+                        config={"recursion_limit": RECURSION_LIMIT})
+                except Exception as exc:
+                    if not _is_agent_failure(exc):
+                        reason = _abort_reason(exc)
+                        run_span.set_attribute("dam.eval.outcome", "aborted")
+                        run_span.record_exception(exc)
+                        observability.mark_span(run_span, "aborted", reason)
+                        raise EvalAborted(reason) from exc
+                    run_span.set_attribute("dam.eval.outcome", "crashed")
+                    run_span.record_exception(exc)
+                    observability.mark_span(run_span, "crashed", type(exc).__name__)
+                    traces.append(Trace(
+                        task=task.name, latency_s=time.perf_counter() - start,
+                        crashed=True,
+                        crash_cause=f"{type(exc).__name__}: {str(exc)[:200]}",
+                        task_completed=False))
+                    continue
 
-        trace = from_messages(task.name, result["messages"],
-                              latency_s=time.perf_counter() - start)
-        if not trace.calls:
-            trace.crashed = True
-            trace.crash_cause = "empty trace: agent completed without any tool call"
-        trace.task_completed = trace.completed_task(task.requires)
-        traces.append(trace)
+                trace = from_messages(task.name, result["messages"],
+                                      latency_s=time.perf_counter() - start)
+                if not trace.calls:
+                    trace.crashed = True
+                    trace.crash_cause = (
+                        "empty trace: agent completed without any tool call")
+                trace.task_completed = trace.completed_task(task.requires)
+                outcome = "crashed" if trace.crashed else "completed"
+                run_span.set_attribute("dam.eval.outcome", outcome)
+                run_span.set_attribute("dam.task_completed",
+                                       bool(trace.task_completed))
+                observability.mark_span(run_span, outcome, trace.crash_cause or None)
+                traces.append(trace)
     return aggregate(task.name, traces), traces
 
 
@@ -223,6 +252,7 @@ def _synthetic_corpus() -> Path:
 async def _main(args) -> int:
     from agent.graph import load_env
     load_env()          # .env -> environment before any provider client is built
+    observability.configure_default_tracing("dam-eval")   # honours the OTEL env vars
     data_dir = _synthetic_corpus() if args.synthetic else Path(args.data)
     if not sorted(data_dir.glob("Monitor*.txt")):
         print(f"No Monitor*.txt in {data_dir}", file=sys.stderr)

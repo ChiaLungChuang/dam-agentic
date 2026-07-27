@@ -100,6 +100,13 @@ disabled, and `docs/private-inference.md` explains the tradeoff.
 
 ## Phase 2 — Tracing and audit events (OpenTelemetry)
 
+> **Phase 2 CLOSED** (2026-07-27, branch `phase2-observability`) — acceptance
+> evidence: [`phase2-observability-report.md`](phase2-observability-report.md);
+> design + configuration: [`observability.md`](observability.md). One caveat is
+> recorded honestly rather than closed over: cross-process spans correlate by
+> `session_id`, not yet by a shared W3C trace context (the seam is left open). The
+> audit log has no such limit.
+
 **Why:** two requirements converge here. Observability tooling wants traces; the
 "auditable" requirement in secure-deployment patterns wants a record of who did what
 to which data. One instrumentation pass produces both.

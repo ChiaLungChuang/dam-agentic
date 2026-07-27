@@ -52,3 +52,32 @@ requires_rtivity = pytest.mark.skipif(
     not rtivity_available(),
     reason="Rtivity-Python engine not importable (set RTIVITY_PYTHON_PATH)",
 )
+
+
+# In-memory span capture for the observability tests. OpenTelemetry allows exactly
+# one process-global tracer provider, so it is installed once and its exporter is
+# cleared between tests. Reused by every test that asserts on emitted spans.
+_SPAN_EXPORTER = None
+
+
+@pytest.fixture
+def spans():
+    pytest.importorskip("opentelemetry")
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    global _SPAN_EXPORTER
+    if _SPAN_EXPORTER is None:
+        _SPAN_EXPORTER = InMemorySpanExporter()
+        provider = trace.get_tracer_provider()
+        if not isinstance(provider, TracerProvider):
+            provider = TracerProvider()
+            trace.set_tracer_provider(provider)
+        provider.add_span_processor(SimpleSpanProcessor(_SPAN_EXPORTER))
+    _SPAN_EXPORTER.clear()
+    yield _SPAN_EXPORTER
+    _SPAN_EXPORTER.clear()
