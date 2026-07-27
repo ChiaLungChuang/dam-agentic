@@ -221,11 +221,19 @@ produce numbers. The engine arm is covered only by CI and by a local run.
   Phase 3.3 changes `default_principal()`'s body, never the field, and `run_id` is
   deliberately a separate axis so the two do not collide.
 
-## Working agreements (unchanged)
+## Working agreements
 
-TDD; scoped commits; `pytest -q` **and** `ruff check .` before declaring done, with
-actual counts reported **and their partiality stated**; CI green on 3.11/3.12/3.13;
-network- and key-dependent work is keyless-tested or skipped, never left to fail
-intermittently. Ask before adding a feature that was not scoped, even when it looks
-necessary — `DAM_CONTRASTS_PATH` was accepted here only because it was repair for
-self-inflicted breakage and was the correct fix.
+TDD; scoped commits; `pytest -q` **and** `ruff check .` before declaring done; CI
+green on 3.11/3.12/3.13; network- and key-dependent work is keyless-tested or
+skipped, never left to fail intermittently.
+
+**The verification-reporting rules that came out of the failure above now live in
+`CLAUDE.md`, under "Reporting verification".** They were written here first, which
+was the wrong home: a handoff is read once, when someone picks up the thread, and
+these need to bind every session. The account of *why* stays here; the rule itself
+is in `CLAUDE.md`. In short: say what you actually ran before committing and flag
+it partial, report `passed / skipped / collected` because uncollected modules are
+silent where skips are loud, say "parses and validates" rather than "works" for
+anything the engine arm cannot reach, and ask before widening scope — the one
+exception granted here was repair of self-inflicted breakage where the repair was
+the correct fix anyway (`DAM_CONTRASTS_PATH`).

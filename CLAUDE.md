@@ -196,6 +196,35 @@ API key), and the frailty-marker research question in `changepoint-frailty-note.
 (needs ≥5-day runs). The HITL-relevant [human] items from HANDOFF-2 remain: the
 monitor/treatment confound, and writing the real `config/contrasts.yaml`.
 
+## Reporting verification — say what you ran, before you commit
+
+These are standing rules, not advice. Both come from a real failure: a commit that
+broke ten tests was pushed and reported clean, because one test file had been run
+and the repo's dependencies were not installed.
+
+**State what you actually ran, before committing, and flag it as partial.** A pass
+count from an environment missing dependencies is a partial view, not a result. "I
+ran `tests/test_config.py`, not the suite — the engine is not installed here" is a
+complete and useful sentence. Reporting the shortfall afterwards is too late; the
+commit is already pushed.
+
+**A pass count is meaningless without a collection count.** Report
+`passed / skipped / collected`. `114 passed, 10 skipped` looked healthy and
+concealed thirteen tests that were never collected at all — `langchain` was
+absent, so whole modules vanished rather than skipping visibly. Skips are loud;
+uncollected modules are silent. Only the collected total catches them.
+
+**Name what the environment cannot verify.** `requires_rtivity` (10 tests) needs
+the analysis engine, which will not install in a bare container. Anything behind
+it — including whether a contrast file *produces numbers*, as opposed to parsing
+and validating — is unverified there. Say "parses and validates", never "works".
+
+**Never widen scope to fix something you noticed.** Ask first, even when the fix
+looks necessary and obvious. The one exception already granted: repair of
+breakage you caused yourself, where the repair is the correct fix anyway.
+
+Longer account, with the specific failures: `docs/HANDOFF-9-preregistration-and-run-attribution.md`.
+
 ## Lint policy
 
 `[tool.ruff.lint] select = ["E4", "E7", "E9", "F"]` — ruff's historical default,
