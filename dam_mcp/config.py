@@ -14,32 +14,54 @@ from pathlib import Path
 
 from .errors import ToolError
 
-DEFAULT_CONFIG_PATH = (
+TEMPLATE_PATH = (
     Path(__file__).resolve().parent.parent / "config" / "contrasts.yaml"
 )
 
 _REQUIRED_KEYS = {"id", "metric", "phase", "groups"}
 
+#: The phases a contrast may name. Closed on purpose — the engine used to resolve
+#: anything outside (light, l, day) to Dark, so a typo produced a clean-looking
+#: result for the wrong phase with nothing anomalous to notice.
+PHASES = ("light", "dark")
+
+#: The metrics the engine can compute. Checked here, at load, so a typo in the
+#: twelfth contrast surfaces before the first is run rather than eleven runs later.
+METRICS = ("total_sleep", "mean_bout_duration", "counts_per_waking_minute")
+
+#: The tests run_contrast supports.
+TESTS = ("wilcoxon", "t")
+
 
 def config_path() -> Path:
-    """Which pre-registered set is in effect: DAM_CONTRASTS_PATH if set, else the
-    repo's config/contrasts.yaml.
+    """Which pre-registered set is in effect. DAM_CONTRASTS_PATH, and nothing else.
 
-    One server commonly serves several experiments — a young / middle / old
-    timepoint series is one pre-registration each — and the alternative to this is
+    There is deliberately **no default**. config/contrasts.yaml is a template with
+    placeholder labels; falling back to it would mean an unregistered comparison
+    could run and look registered, which is the single failure this gate exists to
+    prevent. An unset variable breaks loudly, once, at setup — the right failure.
+
+    One server commonly serves several experiments (a young / middle / old
+    timepoint series is one pre-registration each), so the alternative is
     overwriting one file in place, where nothing records which set was live for a
-    given run. That is the failure this repo keeps finding: an operation that
-    silently used the wrong input and reported success. list_contrasts returns the
-    resolved path for the same reason.
+    given run. list_contrasts returns the resolved path for the same reason.
 
     Read per call, never frozen at import: a captured path is indistinguishable
     from correct in a single-experiment process and wrong the moment a second set
-    is used. `or` rather than a get() default, so an empty value from a launch spec
-    built off a maybe-None falls back instead of resolving to Path('')."""
+    is used."""
     env = os.environ.get("DAM_CONTRASTS_PATH")
-    if env:
-        return Path(env)
-    return DEFAULT_CONFIG_PATH
+    if not env:
+        raise ToolError(
+            "DAM_CONTRASTS_PATH is not set, so no pre-registered contrast set is "
+            "in effect and no contrast can be run. There is no default on purpose: "
+            f"the file at {TEMPLATE_PATH} is a TEMPLATE with placeholder group "
+            "labels, and loading it silently would let an unregistered comparison "
+            "look pre-registered. Point the server at a real set, e.g. "
+            "DAM_CONTRASTS_PATH=config/contrasts-<experiment>.yaml — see "
+            "docs/running.md. Every other tool works without it; only "
+            "list_contrasts, run_contrast and assign_groups need it."
+        )
+    return Path(env)
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -64,22 +86,92 @@ def load_config(path: Path | None = None) -> dict:
         ) from None
 
     data = yaml.safe_load(path.read_text()) or {}
+    _check_experiment_matches_filename(data, path)
+
     contrasts = data.get("contrasts") or []
     if not isinstance(contrasts, list):
         raise ToolError(
-            "config/contrasts.yaml has a 'contrasts:' key that is not a list. It "
-            "must be a list of contrast declarations."
+            f"{path} has a 'contrasts:' key that is not a list. It must be a list "
+            "of contrast declarations."
         )
     for i, c in enumerate(contrasts):
         if not isinstance(c, dict):
-            raise ToolError(f"Contrast #{i} in contrasts.yaml is not a mapping.")
+            raise ToolError(f"Contrast #{i} in {path} is not a mapping.")
         missing = _REQUIRED_KEYS - set(c)
         if missing:
             raise ToolError(
                 f"Contrast '{c.get('id', f'#{i}')}' is missing required key(s): "
                 f"{sorted(missing)}. Each needs id, metric, phase, groups."
             )
+        _check_vocabularies(c, path)
     return data
+
+
+def _check_experiment_matches_filename(data: dict, path: Path) -> None:
+    """The filename must name the experiment the file declares.
+
+    The per-file layout's value is that the commit introducing
+    config/contrasts-<experiment>.yaml is that experiment's pre-registration
+    timestamp. A file named -young that declares -old destroys that silently, and
+    the workflow is 'copy the previous timepoint and edit it' — precisely how it
+    happens. Cheap to check, and it cannot be checked at all if experiment: is
+    absent, so experiment: is required."""
+    experiment = str(data.get("experiment") or "").strip()
+    if not experiment:
+        raise ToolError(
+            f"{path} has no 'experiment:' value. It is required: the filename must "
+            "name the experiment the file declares, so that the commit introducing "
+            "the file is a checkable pre-registration timestamp. Add "
+            "'experiment: <name>' and name the file contrasts-<name>.yaml."
+        )
+    if experiment not in path.stem:
+        raise ToolError(
+            f"{path} declares 'experiment: {experiment}' but its filename stem is "
+            f"'{path.stem}', which does not contain it. One of the two is wrong, "
+            "and guessing which would defeat the point — a file named for one "
+            "experiment while declaring another makes its own commit useless as a "
+            f"pre-registration record. Rename the file to contrasts-{experiment}"
+            ".yaml, or correct the experiment: value."
+        )
+
+
+def _check_vocabularies(c: dict, path: Path) -> None:
+    """phase, metric and test are closed sets, checked at load for every contrast.
+
+    Two reasons this is not left to run time. The engine used to resolve any phase
+    outside (light, l, day) to Dark, so 'dusk' or a typo returned a clean-looking
+    result for the wrong phase — nothing anomalous to notice. And a bad metric
+    surfaced only when that specific contrast ran, so a typo in the twelfth
+    contrast stayed invisible through eleven successful ones."""
+    cid = c.get("id", "?")
+    phase = str(c.get("phase") or "").strip()
+    if phase not in PHASES:
+        raise ToolError(
+            f"Contrast '{cid}' in {path} declares phase {phase!r}, which is not a "
+            f"phase this server recognises. Use one of {list(PHASES)}. This is "
+            "refused rather than guessed at: resolving an unknown phase to dark "
+            "would return a clean-looking result for the wrong half of the day."
+        )
+    metric = c.get("metric")
+    if metric not in METRICS:
+        raise ToolError(
+            f"Contrast '{cid}' in {path} declares metric {metric!r}, which this "
+            f"server cannot compute. Supported: {list(METRICS)}. Add a mapping in "
+            "dam_mcp/engine.py before declaring a new one here."
+        )
+    test = c.get("test", "wilcoxon")
+    if test not in TESTS:
+        raise ToolError(
+            f"Contrast '{cid}' in {path} asks for test {test!r}, which is not "
+            f"supported. Use one of {list(TESTS)} ('wilcoxon' is rank-sum, 't' is "
+            "Welch)."
+        )
+    groups = c.get("groups")
+    if not isinstance(groups, list) or len(groups) != 2:
+        raise ToolError(
+            f"Contrast '{cid}' in {path} names {groups!r}; a contrast compares "
+            "exactly two groups."
+        )
 
 
 def list_contrasts(path: Path | None = None) -> list[dict]:

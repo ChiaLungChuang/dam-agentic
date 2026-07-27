@@ -19,7 +19,7 @@
 #
 # Add contrasts here BEFORE looking at the data.
 
-experiment: EXAMPLE_replace_me
+experiment: testfixture
 
 groups:
   # channel ranges per monitor -> group label. Humans assign this. Never the model.

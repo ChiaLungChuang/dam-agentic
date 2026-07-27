@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-FIXTURE_CONTRASTS = Path(__file__).resolve().parent / "fixtures" / "contrasts.yaml"
+FIXTURE_CONTRASTS = (
+    Path(__file__).resolve().parent / "fixtures" / "contrasts-testfixture.yaml"
+)
 
 
 # The contrast set is a scientific artifact belonging to whoever runs this server,

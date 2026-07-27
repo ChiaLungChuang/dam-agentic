@@ -693,12 +693,14 @@ def _store_metric(session, name: str, summary: dict, decisions: list | None = No
 
 def _check_contrast_labels(assigned: set[str]) -> None:
     """#9: refuse if the declared contrasts reference groups this assignment does
-    not define. Best-effort — a config that cannot be read never blocks assignment,
-    it just skips the check."""
-    try:
-        required = config.contrast_group_labels()
-    except ToolError:
-        return
+    not define.
+
+    No longer best-effort. It used to swallow a ToolError so an unreadable config
+    never blocked assignment; with no default contrast set, 'unreadable' now
+    includes 'DAM_CONTRASTS_PATH is unset', which means no pre-registration is in
+    effect at all. Swallowing that would let groups be assigned outside any
+    declared set — the hole the no-default rule exists to close."""
+    required = config.contrast_group_labels()
     missing = required - assigned
     if missing:
         raise ToolError(
