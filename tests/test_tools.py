@@ -46,15 +46,71 @@ def test_exclusion_requires_reason(srv, monitor_files):
         srv.apply_exclusions(sid, ["Monitor1.txt:5"], reason="")
 
 
-# ── #9: config cross-check refuses labels the contrasts don't reference ───────
+# ── #9: config cross-check refuses labels groups: does not declare ────────────
 
 def test_assign_groups_refuses_undeclared_labels(srv, monitor_files):
+    """The check moved from the contrast set onto groups: (HANDOFF-9 reversal), so
+    it now names the offending label rather than the contrasts. Assert on the
+    labels, not on prose: a message-only assertion would pass on a revert to any
+    other refusal."""
     pytest.importorskip("yaml")
     sid = srv.load_experiment(monitor_files, "x")["session_id"]
     with pytest.raises(ToolError) as exc:
         srv.assign_groups(sid, {"foo": {"Monitor1.txt": [1, 16]},
                                 "bar": {"Monitor1.txt": [17, 32]}})
-    assert "declared contrasts" in str(exc.value)
+    msg = str(exc.value)
+    assert "'bar'" in msg and "'foo'" in msg          # the undeclared labels
+    assert "CG8093_mut" in msg                        # what is declared instead
+
+
+def test_assign_groups_accepts_the_declared_labels(srv, monitor_files):
+    """Negative control for the test above: the same call with declared labels
+    must succeed, or the refusal test would pass against a tool that refuses
+    everything."""
+    pytest.importorskip("yaml")
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(sid, {"CG8093_mut": {"Monitor1.txt": [1, 16]},
+                                  "w1118_ctrl": {"Monitor1.txt": [17, 32]}})
+    assert res["group_sizes"] == {"CG8093_mut": 16, "w1118_ctrl": 16}
+
+
+def test_a_groups_only_declaration_permits_the_pipeline(srv, monitor_files,
+                                                        tmp_path, monkeypatch):
+    """The headline claim of the reversal, exercised rather than asserted.
+
+    A declaration with groups: and no contrasts must carry load -> window -> group
+    all the way. The compute_* step needs the analysis engine, so it is covered by
+    the engine-gated tests; everything up to it runs here."""
+    pytest.importorskip("yaml")
+    decl = tmp_path / "contrasts-designonly.yaml"
+    decl.write_text("experiment: designonly\ngroups: [mut, ctrl]\n")
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(decl))
+
+    loaded = srv.load_experiment(monitor_files, "design-only")
+    sid = loaded["session_id"]
+    srv.run_qc(sid)
+    srv.set_analysis_window(sid, start=loaded["time_window"][0])
+    res = srv.assign_groups(sid, {"mut": {"Monitor1.txt": [1, 16]},
+                                  "ctrl": {"Monitor1.txt": [17, 32]}})
+    assert res["group_sizes"] == {"mut": 16, "ctrl": 16}
+    assert srv.list_contrasts(sid)["contrasts"] == []      # empty, not an error
+
+
+def test_unassigned_declared_group_warns_but_does_not_refuse(srv, monitor_files,
+                                                             tmp_path, monkeypatch):
+    """Subset, not equality: a partial load is legitimate. Flag it, do not block
+    it — and do not silently accept it either."""
+    pytest.importorskip("yaml")
+    decl = tmp_path / "contrasts-four.yaml"
+    decl.write_text("experiment: four\ngroups: [mut, ctrl, extra_a, extra_b]\n")
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(decl))
+
+    sid = srv.load_experiment(monitor_files, "partial")["session_id"]
+    res = srv.assign_groups(sid, {"mut": {"Monitor1.txt": [1, 16]},
+                                  "ctrl": {"Monitor1.txt": [17, 32]}})
+    assert res["group_sizes"] == {"mut": 16, "ctrl": 16}
+    joined = " ".join(res["warnings"])
+    assert "extra_a" in joined and "extra_b" in joined
 
 
 # ── #13: confound warning fires only when groups split by monitor ─────────────

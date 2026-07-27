@@ -59,15 +59,14 @@ a real stdio server:
 | Server start, handshake, `tools/list` | **works** — all 14 tools register |
 | `load_experiment`, `describe_experiment`, `run_qc`, `window_tradeoff`, `set_analysis_window` | **work** |
 | `list_contrasts`, `run_contrast` | **refuse**, naming the variable and the template path |
-| `assign_groups` | **refuses** — it validates group labels against the declared set |
+| `assign_groups` | **refuses** — it validates group labels against the declared `groups:` |
 
 In Claude Code or Claude Desktop the server shows as **Connected**. You can load
 files and run QC. The refusal arrives the first time you try to group or contrast.
 
-`assign_groups` is the surprising one, so: it needs the contrast set not because
-grouping depends on contrasts, but because it checks the labels you assign against
-the labels the declared contrasts name — that check is what stops a pre-registered
-contrast from pointing at a group with no animals in it.
+`assign_groups` needs the file because `groups:` is where the legal group labels
+are declared — an undeclared label is refused rather than accepted as a new group.
+It does **not** need any contrast to be declared.
 
 Because `assign_groups` is where it stops, everything downstream of grouping stops
 too: `compute_sleep`, `compute_activity`, `compute_rhythmicity`, `compute_survival`
@@ -79,22 +78,50 @@ The refusal message names `DAM_CONTRASTS_PATH`, the template path it did *not*
 load, and what to set. If you see it, you have a missing pre-registration, not a
 broken install.
 
+### What the file declares
+
+The file's primary job is to declare the **experimental design**. Statistics are
+optional.
+
+```yaml
+experiment: myexperiment-2026-07
+groups: [mut, ctrl]           # REQUIRED — the legal group labels
+# contrasts:                  # OPTIONAL — omit entirely if you test elsewhere
+```
+
+That is a complete, valid declaration. It loads, `list_contrasts` returns an empty
+list (not an error), and the full **load → window → group → compute** pipeline
+runs. If your statistics happen outside this tool — metrics exported to Prism, say
+— this is the whole file you need.
+
+Add `contrasts:` only if you want pre-registered comparisons executed *here*. Where
+both are present, every label a contrast names must already be in `groups:`.
+
+> **The `DAM_CONTRASTS_PATH` name is now slightly off** — the file's primary job is
+> the design, not the tests. It is deliberately not renamed: an env var is a
+> published interface and churning it would break every existing client config for
+> a cosmetic gain. See `docs/HANDOFF-9`.
+
 `config/contrasts.yaml` in this repo is a **template** with placeholder group
 labels. It is not a pre-registration and it will not load — its `experiment:`
 value does not match its filename, on purpose. Copy it:
 
 ```bash
 cp config/contrasts.yaml config/contrasts-myexperiment-2026-07.yaml
-# edit: set `experiment: myexperiment-2026-07`, real group labels, real contrasts
+# edit: set `experiment: myexperiment-2026-07` and the real group labels
 git add config/contrasts-myexperiment-2026-07.yaml && git commit
 ```
 
-Two rules the loader enforces, both refusing rather than guessing:
+Rules the loader enforces, all refusing rather than guessing:
 
+* **`groups:` is required.** A file with contrasts but no `groups:` is refused, not
+  repaired by deriving the labels from the contrasts — deriving would let a typo'd
+  contrast label quietly become a legal group.
 * **The filename must contain the `experiment:` value.** A file named `-young`
   declaring `-old` would make its own commit useless as a pre-registration
   record, and the workflow above — copy the previous timepoint and edit it — is
   exactly how that happens.
+* **Contrast labels must be a subset of `groups:`**, checked at load.
 * **`phase:` is `light` or `dark`; `metric:` and `test:` are closed sets too**,
   checked for every contrast at load. A typo used to resolve to `dark` silently
   and return a clean-looking result for the wrong half of the day.

@@ -59,10 +59,12 @@ Both halves are gone.
    against "an unregistered comparison looked registered". `docs/running.md`
    carries the `claude mcp add --env` and `claude_desktop_config.json` fix, because
    a client launches the server itself and a shell `export` never reaches it.
-2. **`_check_contrast_labels` no longer swallows `ToolError`.** It was
-   best-effort, so an unreadable config never blocked assignment. With no default,
-   "unreadable" now includes "no pre-registration is in effect" — swallowing that
-   would reopen the hole the rule closes.
+2. **The label check no longer swallows `ToolError`.** It was best-effort, so an
+   unreadable config never blocked assignment. With no default, "unreadable" now
+   includes "nothing is declared" — swallowing that would reopen the hole the rule
+   closes. *(Since renamed `_check_contrast_labels` → `_check_group_labels` and
+   pointed at `groups:`; see the reversal below. This decision still stands — only
+   what it checks against changed.)*
 3. **The filename must contain `experiment:`.** The layout's whole value is that
    the commit introducing `config/contrasts-<experiment>.yaml` is that
    experiment's pre-registration timestamp. A file named `-young` declaring `-old`
@@ -79,7 +81,71 @@ Both halves are gone.
    only that the template refuses to load. A test that goes red because a
    scientist declared their actual experiment is testing the wrong thing.
 
+### ⚠ REVERSED — grouping no longer requires a declared contrast set
+
+**Superseded 2026-07-27, after PR #4 and #5 merged.** The section below is kept
+verbatim because its reasoning is still correct about *what the check is for*; it
+was wrong about *what the check should hang off*. Read it, then read this.
+
+**What changed.** `groups:` is now authoritative and required: it declares the
+legal group labels, and `assign_groups` is checked against it. `contrasts:` is
+optional. A file with `groups:` and no contrasts is a complete declaration that
+permits the whole load → window → group → compute pipeline. `list_contrasts`
+returns an empty list on such a file rather than erroring; `run_contrast` still
+refuses any id not declared.
+
+**What prompted it.** The investigator's actual analysis workflow has no in-tool
+statistics step: Rtivity produces metrics, they are exported, and all testing
+happens in Prism. So the contrast set was gating a path the work does not travel —
+grouping was blocked on declaring *tests* that would never be declared, for an
+experiment that is perfectly well specified without them. This project's value is
+the harness engineering, not the analysis; statistics are deprioritised
+accordingly.
+
+**This is a move, not a removal — the distinction the section below insisted on.**
+It said: *"the thing to preserve is the check, not the timing: it can move later,
+but it cannot become optional without reopening the config/session mismatch."*
+That constraint is honoured. An undeclared label is still refused, one layer
+earlier, at the point the human types it in `assign_groups`. What changed is what
+it is checked against.
+
+**The rule changed shape too, and got stricter in one direction.** The old rule was
+a *union*: every label the contrasts named had to be assigned, and any label a
+contrast named was thereby legal. That silently accepted a typo'd contrast label
+as a new legal group. The new rule is a *subset*, enforced twice:
+
+* contrast labels ⊆ `groups:`, checked **at load** — a contrast typo now surfaces
+  before any run, not as an empty arm much later;
+* assigned labels ⊆ `groups:`, checked **at assign time** — an assignment typo is
+  refused where it is made.
+
+**One thing genuinely relaxed, stated plainly.** Declaring a group and not
+assigning it used to be a refusal (via the union rule); it is now a **warning** on
+`assign_groups`. A partial load — one monitor of a four-arm design — is
+legitimate, and refusing it would block real work. A contrast naming an unassigned
+arm still fails loudly in `run_contrast` ("Group 'X' has no animals with a … value").
+If that trade proves wrong, tighten the warning to a refusal; do not restore the
+union rule.
+
+**Compatibility decision, made explicitly** (a file with `contrasts:` and no
+`groups:`): **refuse, do not derive.** Deriving `groups:` from the contrast labels
+*is* the union rule, so it would reintroduce exactly the defect the subset rule
+removes, and it would make a file's meaning depend on whether a key happened to be
+present — one loader with two silent semantics. The refusal names the labels the
+contrasts reference, so fixing it is a copy-paste. Blast radius in this repo is
+zero: both files carrying contrasts already declare `groups:`.
+
+**`DAM_CONTRASTS_PATH` is not renamed.** The name is now slightly off — the file's
+primary job is the design, not the tests. An env var is a published interface, and
+churning it would break every existing client config for a cosmetic gain. Noted in
+`docs/running.md` and in the template header instead.
+
+---
+
 ### Why grouping requires a declared contrast set
+
+*(Historical — see the reversal above. Retained for the reasoning, which explains
+what the check protects and why it could move but not vanish.)*
 
 The one refusal that looks like overreach, so it is worth writing down before
 someone "fixes" it.

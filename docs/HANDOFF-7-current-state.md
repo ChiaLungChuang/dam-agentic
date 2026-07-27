@@ -77,9 +77,26 @@ collected`, always; see `CLAUDE.md`.
 
 ### The contrast set is now a required, checked input
 
+The file declares an **experimental design**; statistics are optional.
+
+```yaml
+experiment: myexperiment-2026-07
+groups: [mut, ctrl]      # REQUIRED — the legal labels assign_groups is checked against
+# contrasts:             # OPTIONAL — omit if the statistics happen outside this tool
+```
+
+That is complete and valid. It loads, `list_contrasts` returns `[]` (not an error),
+and the full load → window → group → compute pipeline runs. `contrasts:` is only
+needed if you want pre-registered comparisons executed *here*; where both are
+present, contrast labels must be a subset of `groups:`.
+
+`DAM_CONTRASTS_PATH` is a slightly wrong name for this — the file's primary job is
+the design, not the tests — and is deliberately **not** renamed: an env var is a
+published interface and churning it breaks every client config for a cosmetic gain.
+
 `config/contrasts.yaml` is a **template with placeholder labels and cannot load**
 (its `experiment:` value does not match its filename, by design). Real
-pre-registrations live beside it as `config/contrasts-<experiment>.yaml`, one per
+declarations live beside it as `config/contrasts-<experiment>.yaml`, one per
 experiment, each introduced by its own commit — that commit is the
 pre-registration timestamp and the only part of this gate a reviewer can check
 independently.
@@ -92,9 +109,9 @@ With it unset the **server still starts and lists all 14 tools** — this is not
 startup failure and must not be read as a broken MCP server. `load_experiment`,
 `describe_experiment`, `run_qc`, `window_tradeoff` and `set_analysis_window` work;
 `list_contrasts`, `run_contrast` and `assign_groups` refuse, naming the variable.
-Because `assign_groups` is the stopping point and every `compute_*` tool requires
-groups, **the pipeline runs as far as QC and then halts.** Operational detail and
-the Claude Code / Claude Desktop `env` block: `docs/running.md`.
+`assign_groups` needs the file for its `groups:` key, not for any contrast.
+Operational detail and the Claude Code / Claude Desktop `env` block:
+`docs/running.md`.
 
 ---
 
@@ -125,11 +142,11 @@ the Claude Code / Claude Desktop `env` block: `docs/running.md`.
 
 ### From this round (HANDOFF-9)
 
-9. **No default contrast set.** Unset `DAM_CONTRASTS_PATH` refuses. Falling back to
-   the template would let an unregistered comparison run and look registered — the
-   single failure this gate exists to prevent. `_check_contrast_labels` no longer
-   swallows a `ToolError` either: with no default, "unreadable" includes "nothing
-   is pre-registered", and swallowing that reopens the hole.
+9. **No default declaration file.** Unset `DAM_CONTRASTS_PATH` refuses. Falling
+   back to the template would let an undeclared design run and look declared.
+   `_check_group_labels` does not swallow a `ToolError` either: with no default,
+   "unreadable" includes "nothing is declared", and swallowing that reopens the
+   hole.
 10. **The filename must contain the `experiment:` value.** A file named `-young`
     declaring `-old` makes its own commit useless as a pre-registration record,
     and the documented workflow is copy-and-edit — exactly how it happens.
@@ -146,6 +163,23 @@ the Claude Code / Claude Desktop `env` block: `docs/running.md`.
     output is empty for precisely the runs worth investigating.
     `AuditRecord.run_id` defaults to the **constant**, never to `default_run_id()`,
     so reverting the dispatch wiring is detectable.
+
+### Reversal since (recorded in HANDOFF-9)
+
+13. **`groups:` is authoritative; `contrasts:` is optional.** `groups:` declares
+    the legal labels and `assign_groups` is checked against it. A file with
+    `groups:` and no contrasts is complete and permits the whole pipeline;
+    `list_contrasts` returns `[]` rather than erroring. **What prompted it:** the
+    workflow has no in-tool statistics step — metrics are exported and tested in
+    Prism — so gating grouping on declared *tests* gated a path the work does not
+    travel. HANDOFF-9 said the check "can move but cannot become optional"; this
+    moved it and did not remove it. An undeclared label is still refused, one layer
+    earlier. Where both keys are present, contrast labels must be a **subset** of
+    `groups:` (the old union rule silently accepted a typo'd contrast label as a
+    new legal group). A file with contrasts and no `groups:` is **refused, not
+    derived** — deriving is the union rule again. Declaring a group and not
+    assigning it is now a warning rather than a refusal, so a partial load is not
+    blocked; that is the one thing genuinely relaxed.
 
 ### Standing verification rules — now in `CLAUDE.md`
 

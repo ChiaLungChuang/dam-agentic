@@ -28,12 +28,21 @@ def test_unknown_contrast_is_actionable():
     assert "only run a contrast" in str(exc.value)
 
 
-def _write(path, *, experiment, cid="c1", phase="dark", metric="total_sleep"):
-    path.write_text(
-        f"experiment: {experiment}\n"
-        f"contrasts:\n  - id: {cid}\n    metric: {metric}\n"
-        f"    phase: {phase}\n    groups: [a, b]\n"
-    )
+def _write(path, *, experiment, cid="c1", phase="dark", metric="total_sleep",
+           groups=("a", "b"), contrast_groups=None):
+    """A declaration file. groups: is the authoritative list of legal labels;
+    contrasts: is optional and its labels must be a subset of groups:."""
+    body = f"experiment: {experiment}\ngroups: [{', '.join(groups)}]\n"
+    if cid is not None:
+        cg = list(contrast_groups if contrast_groups is not None else groups[:2])
+        body += (f"contrasts:\n  - id: {cid}\n    metric: {metric}\n"
+                 f"    phase: {phase}\n    groups: [{', '.join(cg)}]\n")
+    path.write_text(body)
+    return path
+
+
+def _write_groups_only(path, *, experiment, groups=("a", "b")):
+    path.write_text(f"experiment: {experiment}\ngroups: [{', '.join(groups)}]\n")
     return path
 
 
@@ -209,15 +218,153 @@ def test_engine_phase_label_refuses_the_rest(phase):
         engine._phase_label(phase)
 
 
+# ── groups: is authoritative; contrasts: is optional ──────────────────────────
+#
+# Reversal, recorded in HANDOFF-9. The label check used to live on the contrast
+# set: assign_groups refused unless every label the contrasts named was assigned.
+# That gated grouping on declared *tests*, and this workflow has no in-tool
+# statistics step — metrics are exported and tested in Prism — so it gated a path
+# the work does not travel. The check moved onto groups:. It did not become
+# optional: an undeclared label is still refused, one layer earlier.
+
+
+def test_groups_only_file_is_valid_and_loads(tmp_path, monkeypatch):
+    """The point of the change. A file that declares the design and no tests is a
+    complete, legal declaration."""
+    p = _write_groups_only(tmp_path / "contrasts-designonly.yaml",
+                           experiment="designonly", groups=("mut", "ctrl"))
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    assert config.declared_groups() == {"mut", "ctrl"}
+    assert config.list_contrasts() == []
+
+
+def test_list_contrasts_on_a_contrast_free_file_is_empty_not_an_error(
+        tmp_path, monkeypatch):
+    p = _write_groups_only(tmp_path / "contrasts-designonly.yaml",
+                           experiment="designonly")
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    assert config.list_contrasts() == []                    # no raise
+
+
+def test_run_contrast_still_refuses_an_undeclared_id(tmp_path, monkeypatch):
+    """Contrasts being optional must not make run_contrast permissive."""
+    p = _write_groups_only(tmp_path / "contrasts-designonly.yaml",
+                           experiment="designonly")
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    with pytest.raises(ToolError) as exc:
+        config.get_contrast("anything_at_all")
+    assert "declares no contrasts" in str(exc.value)
+
+
+def test_groups_accepts_a_mapping_as_well_as_a_list(tmp_path, monkeypatch):
+    """Both shapes exist in the repo — the template lists labels, the older stub
+    maps label -> {monitor: range}. Keys are the labels either way, so this is
+    deterministic rather than a guess. Mapping values are documentary and never
+    read; channel ranges reach the server through assign_groups."""
+    p = tmp_path / "contrasts-mapped.yaml"
+    p.write_text(
+        "experiment: mapped\n"
+        "groups:\n"
+        "  mut:\n    Monitor1.txt: [1, 16]\n"
+        "  ctrl:\n    Monitor1.txt: [17, 32]\n"
+    )
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    assert config.declared_groups() == {"mut", "ctrl"}
+
+
+def test_contrast_labels_must_be_a_subset_of_declared_groups(tmp_path, monkeypatch):
+    """The reason for subset rather than union. Under the old union rule a typo'd
+    contrast label quietly became a new legal group; here it is caught at load."""
+    p = _write(tmp_path / "contrasts-sub.yaml", experiment="sub",
+               groups=("mut", "ctrl"), contrast_groups=("mut", "crtl"))
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    with pytest.raises(ToolError) as exc:
+        config.list_contrasts()
+    msg = str(exc.value)
+    assert "crtl" in msg and "mut" in msg and "ctrl" in msg
+
+
+def test_contrast_labels_inside_declared_groups_load(tmp_path, monkeypatch):
+    p = _write(tmp_path / "contrasts-ok.yaml", experiment="ok",
+               groups=("mut", "ctrl", "extra"), contrast_groups=("mut", "ctrl"))
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    assert len(config.list_contrasts()) == 1
+    assert config.declared_groups() == {"mut", "ctrl", "extra"}
+
+
+def test_missing_groups_with_contrasts_present_refuses(tmp_path, monkeypatch):
+    """The compatibility decision, made explicitly: REFUSE, do not derive.
+
+    Deriving groups: from the contrast labels is precisely the union rule this
+    change removes — a typo'd contrast label would silently become a legal group,
+    and the file's meaning would depend on whether a key happened to be present.
+    One loader with two silent semantics is worse than one loud refusal."""
+    p = tmp_path / "contrasts-legacy.yaml"
+    p.write_text(
+        "experiment: legacy\n"
+        "contrasts:\n  - id: c\n    metric: total_sleep\n"
+        "    phase: dark\n    groups: [mut, ctrl]\n"
+    )
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    with pytest.raises(ToolError) as exc:
+        config.list_contrasts()
+    msg = str(exc.value)
+    assert "groups:" in msg
+    assert "mut" in msg and "ctrl" in msg      # names what to declare
+
+
+def test_missing_groups_without_contrasts_refuses_too(tmp_path, monkeypatch):
+    p = tmp_path / "contrasts-empty.yaml"
+    p.write_text("experiment: empty\n")
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    with pytest.raises(ToolError) as exc:
+        config.declared_groups()
+    assert "groups:" in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["groups: []\n", "groups: {}\n", "groups: 3\n",
+                                 "groups: [a, '']\n"])
+def test_malformed_groups_are_refused(tmp_path, monkeypatch, bad):
+    p = tmp_path / "contrasts-bad.yaml"
+    p.write_text("experiment: bad\n" + bad)
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    with pytest.raises(ToolError):
+        config.declared_groups()
+
+
 # ── the gate cannot be skipped by an unreadable config ────────────────────────
 
 def test_group_label_check_propagates_a_missing_config(monkeypatch):
-    """_check_contrast_labels used to swallow a ToolError so an unreadable config
-    never blocked assignment. With no default that is a hole: unset means 'no
-    pre-registration is in effect', and proceeding would assign groups outside any
-    declared set."""
+    """It used to swallow a ToolError so an unreadable config never blocked
+    assignment. With no default that is a hole: unset means 'nothing is declared',
+    and proceeding would assign groups against no declaration at all."""
     pytest.importorskip("mcp")
     from dam_mcp import server
     monkeypatch.delenv("DAM_CONTRASTS_PATH", raising=False)
     with pytest.raises(ToolError):
-        server._check_contrast_labels({"whatever"})
+        server._check_group_labels({"whatever"})
+
+
+def test_assigned_label_not_declared_is_refused(tmp_path, monkeypatch):
+    """The check moved, it did not go away. An undeclared label is still refused —
+    now at the point the human names it, which is where the typo is."""
+    pytest.importorskip("mcp")
+    from dam_mcp import server
+    p = _write_groups_only(tmp_path / "contrasts-d.yaml", experiment="d",
+                           groups=("mut", "ctrl"))
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    with pytest.raises(ToolError) as exc:
+        server._check_group_labels({"mut", "crtl"})
+    assert "crtl" in str(exc.value)
+
+
+def test_assigning_a_subset_of_declared_groups_is_allowed(tmp_path, monkeypatch):
+    """Loading one monitor of a four-group design is legitimate, so a partial
+    assignment must not refuse. run_contrast still errors clearly if a contrast
+    names an arm with no animals."""
+    pytest.importorskip("mcp")
+    from dam_mcp import server
+    p = _write_groups_only(tmp_path / "contrasts-d.yaml", experiment="d",
+                           groups=("a", "b", "c", "d"))
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(p))
+    server._check_group_labels({"a", "b"})                  # no raise
