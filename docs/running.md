@@ -64,6 +64,11 @@ a real stdio server:
 In Claude Code or Claude Desktop the server shows as **Connected**. You can load
 files and run QC. The refusal arrives the first time you try to group or contrast.
 
+`assign_groups` is the surprising one, so: it needs the contrast set not because
+grouping depends on contrasts, but because it checks the labels you assign against
+the labels the declared contrasts name — that check is what stops a pre-registered
+contrast from pointing at a group with no animals in it.
+
 Because `assign_groups` is where it stops, everything downstream of grouping stops
 too: `compute_sleep`, `compute_activity`, `compute_rhythmicity`, `compute_survival`
 and `run_contrast` all require groups, so in practice **the pipeline runs as far as

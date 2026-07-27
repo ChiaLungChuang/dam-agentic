@@ -55,18 +55,48 @@ def monitor_files(corpus_dir):
     return sorted(str(p) for p in corpus_dir.glob("Monitor*.txt"))
 
 
-def rtivity_available() -> bool:
-    try:
-        from dam_mcp import engine
-        engine._ensure_rtivity()
-        return True
-    except Exception:
-        return False
+def _ensure_engine() -> None:
+    """Import the analysis engine. Separate so the tests can make it fail."""
+    from dam_mcp import engine
+    engine._ensure_rtivity()
 
+
+def rtivity_status() -> tuple[bool, str]:
+    """(importable, cause). The cause is kept, not discarded.
+
+    This used to be a bare `except Exception: return False`, so ten tests skipped
+    with a fixed message that guessed at the reason. "Set RTIVITY_PYTHON_PATH" is
+    actively misleading when the real cause was a broken transitive dependency, a
+    version mismatch inside the engine, or a partial install — the reader goes and
+    checks the one thing that was already correct. The broad catch is right (any
+    failure means the engine cannot be used), but throwing away *which* failure is
+    the same defect this repo keeps finding, one layer down in the harness."""
+    try:
+        _ensure_engine()
+    except Exception as exc:                       # noqa: BLE001 — any failure means unusable
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, ""
+
+
+def rtivity_available() -> bool:
+    """Just the boolean, for callers that do not want the cause."""
+    return rtivity_status()[0]
+
+
+def rtivity_skip_reason() -> str:
+    ok, cause = rtivity_status()
+    if ok:
+        return ""
+    return (f"Rtivity-Python engine not importable — {cause} "
+            "(install it, or set RTIVITY_PYTHON_PATH)")
+
+
+_RTIVITY_OK, _RTIVITY_CAUSE = rtivity_status()
 
 requires_rtivity = pytest.mark.skipif(
-    not rtivity_available(),
-    reason="Rtivity-Python engine not importable (set RTIVITY_PYTHON_PATH)",
+    not _RTIVITY_OK,
+    reason=(f"Rtivity-Python engine not importable — {_RTIVITY_CAUSE} "
+            "(install it, or set RTIVITY_PYTHON_PATH)"),
 )
 
 
