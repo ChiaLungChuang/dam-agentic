@@ -18,6 +18,15 @@ Each record carries:
   * ``tool``        — the tool name.
   * ``session_id``  — the analysis session the call belongs to (None for the call
                       that creates it, load_experiment).
+  * ``run_id``      — which run these lines belong to (HANDOFF-8's run-attribution
+                      gap). Sessions are named by whatever label the agent
+                      improvised, so session_id alone cannot tie a block of lines
+                      back to an eval run — and a crashed run's trace holds no tool
+                      calls at all, so nothing reconstructed caller-side covers the
+                      runs most worth investigating. The value is opaque to the
+                      server: caller-asserted, never parsed, never a path
+                      component, and orthogonal to ``principal`` (Phase 3 fills
+                      that one; this is not an identity claim).
   * ``params``      — the arguments the model sent. Safe to record: by the one
                       architectural rule (the model never sees raw data) no activity
                       counts ever pass through a tool argument — only handles, paths,
@@ -50,6 +59,8 @@ OUTCOMES = ("ok", "refused", "error")
 
 DEFAULT_PRINCIPAL = "anonymous"
 
+DEFAULT_RUN_ID = "unattributed"
+
 
 def utc_now_iso() -> str:
     """A timezone-aware UTC ISO-8601 timestamp. See the module docstring for why
@@ -62,6 +73,19 @@ def default_principal() -> str:
     Phase 3 — so this is an explicit placeholder (overridable with DAM_PRINCIPAL),
     never a silent blank that would read as 'no one'."""
     return os.environ.get("DAM_PRINCIPAL") or DEFAULT_PRINCIPAL
+
+
+def default_run_id() -> str:
+    """The run this server's calls belong to, handed in out of band by whoever
+    launched it (DAM_RUN_ID). Read per call, not cached: a cached resolver is
+    indistinguishable from correct in production, because a subprocess's
+    environment never changes after exec.
+
+    `or` rather than a get() default on purpose — an empty string is what a launch
+    spec built from a maybe-None value produces, and it would serialise as a
+    present-but-blank key that reads as 'attributed to nothing' while escaping a
+    grep for the placeholder."""
+    return os.environ.get("DAM_RUN_ID") or DEFAULT_RUN_ID
 
 
 def _state_dir() -> Path:
@@ -86,6 +110,12 @@ class AuditRecord:
     principal: str
     tool: str
     session_id: str | None
+    # Defaulted to the CONSTANT, never to default_run_id(). If the dispatch layer
+    # stops passing run_id, the record must read "unattributed" while the
+    # environment says otherwise — a record that quietly picked the env up itself
+    # would hide exactly that revert. (HANDOFF-6-amendment-1 §D.3: a contract test
+    # that passes on a full revert of the change it covers pins nothing.)
+    run_id: str = DEFAULT_RUN_ID
     params: dict = field(default_factory=dict)
     data_files: list[str] = field(default_factory=list)
     outcome: str = "ok"
@@ -95,12 +125,14 @@ class AuditRecord:
     @classmethod
     def now(cls, *, principal: str, tool: str, session_id: str | None,
             params: dict, data_files: list[str], outcome: str,
-            error: str | None = None, duration_ms: float = 0.0) -> AuditRecord:
+            error: str | None = None, duration_ms: float = 0.0,
+            run_id: str = DEFAULT_RUN_ID) -> AuditRecord:
         if outcome not in OUTCOMES:
             raise ValueError(f"outcome must be one of {OUTCOMES}, got {outcome!r}")
         return cls(
             timestamp=utc_now_iso(), principal=principal, tool=tool,
-            session_id=session_id, params=params, data_files=list(data_files),
+            session_id=session_id, run_id=run_id, params=params,
+            data_files=list(data_files),
             outcome=outcome, error=error, duration_ms=duration_ms,
         )
 
