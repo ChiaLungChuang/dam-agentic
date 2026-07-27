@@ -1,0 +1,51 @@
+# TEST FIXTURE — not a real pre-registration.
+#
+# The suite pins itself to this file (via DAM_CONTRASTS_PATH, set by an autouse
+# fixture in conftest.py) so that whatever a lab declares in the real
+# config/contrasts.yaml cannot turn CI red. The live file is the scientist's
+# data, not the suite's fixture: a test that breaks when someone pre-registers
+# their actual experiment is testing the wrong thing.
+#
+# The group labels below are load-bearing — tests/test_tools.py,
+# test_tool_contract.py, test_contract.py, test_fake_agent.py and
+# test_eval_spans.py all assign these exact labels.
+#
+# Pre-declared contrast set.
+#
+# The agent reads this file and may run any contrast in it. It cannot write to it
+# and cannot invent comparisons. This is pre-registration enforced by the tool
+# boundary rather than by discipline: an agent free to search metrics x groups x
+# phases for significance will find some, every time, and write fluently about it.
+#
+# Add contrasts here BEFORE looking at the data.
+
+experiment: testfixture
+
+groups:
+  # channel ranges per monitor -> group label. Humans assign this. Never the model.
+  CG8093_mut:
+    Monitor1.txt: [1, 16]
+  w1118_ctrl:
+    Monitor1.txt: [17, 32]
+
+contrasts:
+  - id: mut_vs_ctrl_sleep_night
+    metric: total_sleep
+    phase: dark
+    groups: [CG8093_mut, w1118_ctrl]
+    test: wilcoxon
+    rationale: Primary endpoint. Night sleep is the pre-registered comparison.
+
+  - id: mut_vs_ctrl_bout_duration_night
+    metric: mean_bout_duration
+    phase: dark
+    groups: [CG8093_mut, w1118_ctrl]
+    test: wilcoxon
+    rationale: Distinguishes sleep fragmentation from total sleep loss.
+
+  - id: mut_vs_ctrl_activity_day
+    metric: counts_per_waking_minute
+    phase: light
+    groups: [CG8093_mut, w1118_ctrl]
+    test: wilcoxon
+    rationale: Locomotor control — rules out a general activity deficit.

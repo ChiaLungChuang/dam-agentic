@@ -16,6 +16,22 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+FIXTURE_CONTRASTS = (
+    Path(__file__).resolve().parent / "fixtures" / "contrasts-testfixture.yaml"
+)
+
+
+# The contrast set is a scientific artifact belonging to whoever runs this server,
+# not a test fixture. Before DAM_CONTRASTS_PATH existed the suite read the live
+# config/contrasts.yaml directly, so replacing the EXAMPLE stub with a real
+# pre-registration turned ten tests red — the suite was pinned to one lab's
+# groups. Point every test at a fixture instead; the live file gets exactly one
+# test of its own (test_config.py::test_the_repos_own_contrast_file_parses), which
+# checks that it parses without caring what is in it.
+@pytest.fixture(autouse=True)
+def _pin_contrasts_to_fixture(monkeypatch):
+    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(FIXTURE_CONTRASTS))
+
 
 # Session-scoped: the synthetic monitor files are read-only, so generating them
 # once and sharing them across the whole run turns a ~2.5 min suite (a fresh
@@ -39,18 +55,48 @@ def monitor_files(corpus_dir):
     return sorted(str(p) for p in corpus_dir.glob("Monitor*.txt"))
 
 
-def rtivity_available() -> bool:
-    try:
-        from dam_mcp import engine
-        engine._ensure_rtivity()
-        return True
-    except Exception:
-        return False
+def _ensure_engine() -> None:
+    """Import the analysis engine. Separate so the tests can make it fail."""
+    from dam_mcp import engine
+    engine._ensure_rtivity()
 
+
+def rtivity_status() -> tuple[bool, str]:
+    """(importable, cause). The cause is kept, not discarded.
+
+    This used to be a bare `except Exception: return False`, so ten tests skipped
+    with a fixed message that guessed at the reason. "Set RTIVITY_PYTHON_PATH" is
+    actively misleading when the real cause was a broken transitive dependency, a
+    version mismatch inside the engine, or a partial install — the reader goes and
+    checks the one thing that was already correct. The broad catch is right (any
+    failure means the engine cannot be used), but throwing away *which* failure is
+    the same defect this repo keeps finding, one layer down in the harness."""
+    try:
+        _ensure_engine()
+    except Exception as exc:                       # noqa: BLE001 — any failure means unusable
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, ""
+
+
+def rtivity_available() -> bool:
+    """Just the boolean, for callers that do not want the cause."""
+    return rtivity_status()[0]
+
+
+def rtivity_skip_reason() -> str:
+    ok, cause = rtivity_status()
+    if ok:
+        return ""
+    return (f"Rtivity-Python engine not importable — {cause} "
+            "(install it, or set RTIVITY_PYTHON_PATH)")
+
+
+_RTIVITY_OK, _RTIVITY_CAUSE = rtivity_status()
 
 requires_rtivity = pytest.mark.skipif(
-    not rtivity_available(),
-    reason="Rtivity-Python engine not importable (set RTIVITY_PYTHON_PATH)",
+    not _RTIVITY_OK,
+    reason=(f"Rtivity-Python engine not importable — {_RTIVITY_CAUSE} "
+            "(install it, or set RTIVITY_PYTHON_PATH)"),
 )
 
 

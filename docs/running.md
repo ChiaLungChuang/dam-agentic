@@ -43,10 +43,81 @@ install it — no path env var stands in for packaging.
 Session state is written under `~/.dam_mcp/sessions` by default; override with
 `DAM_MCP_STATE_DIR`.
 
+## Declare your contrasts first — `DAM_CONTRASTS_PATH` is required
+
+**There is no default contrast set, and this is deliberate.**
+
+### What actually happens when it is unset
+
+**The server still starts.** This is not a startup failure, and it must not look
+like one — an MCP client showing the server as failed sends you hunting for a
+broken server rather than a missing pre-registration. Verified end-to-end against
+a real stdio server:
+
+| | `DAM_CONTRASTS_PATH` unset |
+|---|---|
+| Server start, handshake, `tools/list` | **works** — all 14 tools register |
+| `load_experiment`, `describe_experiment`, `run_qc`, `window_tradeoff`, `set_analysis_window` | **work** |
+| `list_contrasts`, `run_contrast` | **refuse**, naming the variable and the template path |
+| `assign_groups` | **refuses** — it validates group labels against the declared set |
+
+In Claude Code or Claude Desktop the server shows as **Connected**. You can load
+files and run QC. The refusal arrives the first time you try to group or contrast.
+
+`assign_groups` is the surprising one, so: it needs the contrast set not because
+grouping depends on contrasts, but because it checks the labels you assign against
+the labels the declared contrasts name — that check is what stops a pre-registered
+contrast from pointing at a group with no animals in it.
+
+Because `assign_groups` is where it stops, everything downstream of grouping stops
+too: `compute_sleep`, `compute_activity`, `compute_rhythmicity`, `compute_survival`
+and `run_contrast` all require groups, so in practice **the pipeline runs as far as
+QC and then halts** until a real contrast file exists. That is the intended
+behaviour, not a bug — but it is worth knowing the shape of it before you see it.
+
+The refusal message names `DAM_CONTRASTS_PATH`, the template path it did *not*
+load, and what to set. If you see it, you have a missing pre-registration, not a
+broken install.
+
+`config/contrasts.yaml` in this repo is a **template** with placeholder group
+labels. It is not a pre-registration and it will not load — its `experiment:`
+value does not match its filename, on purpose. Copy it:
+
+```bash
+cp config/contrasts.yaml config/contrasts-myexperiment-2026-07.yaml
+# edit: set `experiment: myexperiment-2026-07`, real group labels, real contrasts
+git add config/contrasts-myexperiment-2026-07.yaml && git commit
+```
+
+Two rules the loader enforces, both refusing rather than guessing:
+
+* **The filename must contain the `experiment:` value.** A file named `-young`
+  declaring `-old` would make its own commit useless as a pre-registration
+  record, and the workflow above — copy the previous timepoint and edit it — is
+  exactly how that happens.
+* **`phase:` is `light` or `dark`; `metric:` and `test:` are closed sets too**,
+  checked for every contrast at load. A typo used to resolve to `dark` silently
+  and return a clean-looking result for the wrong half of the day.
+
+Why no fallback: the commit that introduces a contrast file is that experiment's
+pre-registration timestamp, and it is the only part of this gate a reviewer can
+check independently. Silently loading a template would let an unregistered
+comparison look registered. Breaking loudly once, at setup, is the cheaper
+failure.
+
+Point at the right set per run — one server can serve a whole timepoint series:
+
+```bash
+DAM_CONTRASTS_PATH=config/contrasts-myexperiment-2026-07.yaml python -m dam_mcp.server
+```
+
+`list_contrasts` returns the resolved `config_path`, so which set was live is
+recoverable from the run's own output.
+
 ## Run the MCP server
 
 ```bash
-python -m dam_mcp.server
+DAM_CONTRASTS_PATH=config/contrasts-myexperiment-2026-07.yaml python -m dam_mcp.server
 ```
 
 It speaks stdio (no OAuth — that is for remote servers). Point a client at that
@@ -55,9 +126,46 @@ analysis:
 
 ```
 MCP Inspector → command: python  args: -m dam_mcp.server
+                env:     DAM_CONTRASTS_PATH=/abs/path/to/contrasts-myexp.yaml
 ```
 
 then ask it to QC an experiment folder and compute night sleep by genotype.
+
+### Claude Code / Claude Desktop
+
+The environment matters here, because a client launches the server itself — an
+`export` in your shell does not reach it. In Claude Code:
+
+```bash
+claude mcp add dam \
+    --env DAM_CONTRASTS_PATH=/abs/path/to/config/contrasts-myexp.yaml \
+    -- python -m dam_mcp.server
+```
+
+or, editing the JSON config directly (Claude Desktop's
+`claude_desktop_config.json`, or `.mcp.json` in a project):
+
+```json
+{
+  "mcpServers": {
+    "dam": {
+      "command": "python",
+      "args": ["-m", "dam_mcp.server"],
+      "env": {
+        "DAM_CONTRASTS_PATH": "/abs/path/to/config/contrasts-myexp.yaml"
+      }
+    }
+  }
+}
+```
+
+Use an **absolute** path: the client's working directory is not necessarily the
+repo root. If the server connects but every contrast tool refuses, the `env`
+block is missing or the path is relative — the refusal message names the variable
+and the path it looked at.
+
+Two other variables belong in the same `env` block when you need them:
+`DAM_MCP_STATE_DIR` (session state) and `DAM_MCP_AUDIT_LOG` (the audit stream).
 
 ## Run the agent (Phase 2)
 
@@ -89,3 +197,8 @@ The session, schema, QC-wrapping, and contrast-math tests run against a syntheti
 corpus generated once per session. The server and tool tests need `mcp`; the
 config test needs `pyyaml`; the compute tests need the analysis engine installed.
 Each skips cleanly rather than failing when its dependency is absent.
+
+The suite pins itself to `tests/fixtures/contrasts-testfixture.yaml` via an
+autouse fixture, so it never reads whatever real pre-registration you have in
+`config/`. That is deliberate: a test that goes red because someone declared
+their actual experiment is testing the wrong thing.

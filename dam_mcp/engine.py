@@ -493,6 +493,27 @@ def run_contrast(ds, contrast: dict, n_exclusions: int) -> dict:
     })
 
 
+def _phase_label(phase: str) -> str:
+    """Map a declared phase onto the engine's column value. Closed vocabulary.
+
+    This was `"Light" if phase.lower() in ("light","l","day") else "Dark"` — an
+    else-branch that swallowed everything. A typo, or a phase this server does not
+    model, silently became Dark and produced a clean-looking result for the wrong
+    half of the day, with nothing anomalous for a reader to notice. config.py
+    rejects unknown phases at load; this is the same rule at the point of use, so
+    a contrast dict that reaches the engine by any other route is refused too."""
+    key = str(phase).strip().lower()
+    if key in ("light", "l", "day"):
+        return "Light"
+    if key in ("dark", "d", "night"):
+        return "Dark"
+    raise ToolError(
+        f"Phase {phase!r} is not one this server models. Use 'light' or 'dark'. "
+        "Refused rather than defaulted: silently treating an unknown phase as dark "
+        "would return a well-formed number for the wrong half of the day."
+    )
+
+
 def _per_animal_metric(ds, metric: str, phase: str) -> pd.DataFrame:
     """Per-animal value of a declared metric, filtered to one phase. Returns
     columns id, labels, y in interpretable units: total_sleep in hours per day,
@@ -501,7 +522,7 @@ def _per_animal_metric(ds, metric: str, phase: str) -> pd.DataFrame:
     units, not a fraction hiding behind a metric named "total_sleep".)"""
     from modules.analysis import sleep as S
 
-    phase_cap = "Light" if str(phase).lower() in ("light", "l", "day") else "Dark"
+    phase_cap = _phase_label(phase)
     df = ds.data
 
     if metric == "total_sleep":

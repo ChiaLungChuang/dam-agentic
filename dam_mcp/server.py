@@ -480,13 +480,22 @@ def apply_exclusions(
 def list_contrasts(session_id: str) -> dict:
     """List the pre-declared contrasts the agent is allowed to run.
 
-    The set lives in config/contrasts.yaml, declared before the data was seen. The
-    model may run any contrast here and cannot invent one — this is pre-registration
-    enforced by the tool boundary. Returns each contrast's id, metric, phase,
-    groups, test, and rationale. Choose one and pass its id to run_contrast.
+    The set is declared before the data is seen, in config/contrasts.yaml or
+    wherever DAM_CONTRASTS_PATH points. The model may run any contrast here and
+    cannot invent one — this is pre-registration enforced by the tool boundary.
+    Returns each contrast's id, metric, phase, groups, test, and rationale, plus
+    `config_path`: which file this set came from. Report that path when reporting
+    results — one server may serve several experiments, each with its own
+    pre-registered set, and "which contrasts were live" is not otherwise
+    recoverable from the output. Choose one contrast and pass its id to
+    run_contrast.
     """
     _require(session_id)
-    return {"session_id": session_id, "contrasts": config.list_contrasts()}
+    return {
+        "session_id": session_id,
+        "contrasts": config.list_contrasts(),
+        "config_path": str(config.config_path()),
+    }
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -684,12 +693,14 @@ def _store_metric(session, name: str, summary: dict, decisions: list | None = No
 
 def _check_contrast_labels(assigned: set[str]) -> None:
     """#9: refuse if the declared contrasts reference groups this assignment does
-    not define. Best-effort — a config that cannot be read never blocks assignment,
-    it just skips the check."""
-    try:
-        required = config.contrast_group_labels()
-    except ToolError:
-        return
+    not define.
+
+    No longer best-effort. It used to swallow a ToolError so an unreadable config
+    never blocked assignment; with no default contrast set, 'unreadable' now
+    includes 'DAM_CONTRASTS_PATH is unset', which means no pre-registration is in
+    effect at all. Swallowing that would let groups be assigned outside any
+    declared set — the hole the no-default rule exists to close."""
+    required = config.contrast_group_labels()
     missing = required - assigned
     if missing:
         raise ToolError(
