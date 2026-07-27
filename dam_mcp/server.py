@@ -33,7 +33,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from . import config, engine, report
+from . import config, engine, observability, report
 from .defaults import DEFAULT_DEATH_HOURS
 from .errors import ToolError, needs_groups, needs_qc, unknown_session
 from .schemas import (
@@ -796,5 +796,12 @@ def _to_int(value, what: str) -> int:
         ) from None
 
 
+# One instrumentation pass over tool dispatch (span + audit record per call). The
+# store is passed as a live provider so the tests that swap STORE are still seen.
+# Idempotent, so a re-import does not double-wrap. See dam_mcp/observability.py.
+observability.instrument_tool_dispatch(mcp, store_provider=lambda: STORE)
+
+
 if __name__ == "__main__":
+    observability.configure_default_tracing()
     mcp.run()
