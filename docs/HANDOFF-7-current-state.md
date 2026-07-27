@@ -38,7 +38,7 @@ are not started; Phase 3 is still gated.
 | PR | Merged as | Contents |
 |---|---|---|
 | #3 | `fcfce4b` | HANDOFF-6 **Phase 2** — OTel spans + audit stream over one dispatch seam |
-| #4 | `5254f7f` | Pre-registration infrastructure — `DAM_CONTRASTS_PATH`, filename↔experiment, closed vocabularies |
+| #4 | `5254f7f` | Pre-registration infrastructure — `DAM_PREREG_PATH`, filename↔experiment, closed vocabularies |
 | #5 | `48e4a31` | Run attribution — `run_id` on every audit record and tool span |
 
 #4 and #5 touch **no file in common** and each passes standalone on `main`;
@@ -55,7 +55,7 @@ verified by intersecting their changed-file lists, and by the count arithmetic
 | Python | **use `.venv/bin/python`** — the system `python3` is 3.9 and too old |
 | Analysis engine | `rtivity-python`, installed **editable** from `~/Rtivity-Python` (clean at tag `v0.12.0`) |
 | Engine version string | `pip show rtivity-python` reports **0.11.0**. Known, still-open mismatch: the `v0.12.0` tag was created without bumping `version=`. Not a stale install. |
-| **Contrast set** | **`DAM_CONTRASTS_PATH` is required and has no default.** See below — this is the one setup step that did not exist before. |
+| **Contrast set** | **`DAM_PREREG_PATH` is required and has no default.** See below — this is the one setup step that did not exist before. |
 | Session state | `DAM_MCP_STATE_DIR` overrides `~/.dam_mcp/sessions`. **Set it to a temp dir for evals/tests**, or you will pollute real state. |
 | Audit log | `DAM_MCP_AUDIT_LOG`, else `<state_dir>/audit.jsonl`. `DAM_RUN_ID` labels the lines. |
 | Model credentials | repo-root `.env` (gitignored), loaded by `agent.graph.load_env()`. `GOOGLE_API_KEY` is set. |
@@ -90,9 +90,16 @@ and the full load → window → group → compute pipeline runs. `contrasts:` i
 needed if you want pre-registered comparisons executed *here*; where both are
 present, contrast labels must be a subset of `groups:`.
 
-`DAM_CONTRASTS_PATH` is a slightly wrong name for this — the file's primary job is
-the design, not the tests — and is deliberately **not** renamed: an env var is a
-published interface and churning it breaks every client config for a cosmetic gain.
+The variable was `DAM_CONTRASTS_PATH` until this round. It is now
+**`DAM_PREREG_PATH`**, with no back-compat shim: because there is no default, a
+stale client config fails loudly and names the variable rather than silently
+loading the wrong declaration. The `list_contrasts` **tool** was deliberately not
+renamed — tool names are pinned by the eval layer — so its name is now misleading;
+see HANDOFF-9.
+
+`list_contrasts` returns `contrasts`, `groups`, `config_path` and `warnings`. An
+empty `contrasts` list is the normal case, so `groups` is what makes the reply
+useful.
 
 `config/contrasts.yaml` is a **template with placeholder labels and cannot load**
 (its `experiment:` value does not match its filename, by design). Real
@@ -102,7 +109,7 @@ pre-registration timestamp and the only part of this gate a reviewer can check
 independently.
 
 ```bash
-DAM_CONTRASTS_PATH=config/contrasts-myexp-2026-07.yaml python -m dam_mcp.server
+DAM_PREREG_PATH=config/contrasts-myexp-2026-07.yaml python -m dam_mcp.server
 ```
 
 With it unset the **server still starts and lists all 14 tools** — this is not a
@@ -142,7 +149,7 @@ Operational detail and the Claude Code / Claude Desktop `env` block:
 
 ### From this round (HANDOFF-9)
 
-9. **No default declaration file.** Unset `DAM_CONTRASTS_PATH` refuses. Falling
+9. **No default declaration file.** Unset `DAM_PREREG_PATH` refuses. Falling
    back to the template would let an undeclared design run and look declared.
    `_check_group_labels` does not swallow a `ToolError` either: with no default,
    "unreadable" includes "nothing is declared", and swallowing that reopens the
@@ -179,7 +186,11 @@ Operational detail and the Claude Code / Claude Desktop `env` block:
     new legal group). A file with contrasts and no `groups:` is **refused, not
     derived** — deriving is the union rule again. Declaring a group and not
     assigning it is now a warning rather than a refusal, so a partial load is not
-    blocked; that is the one thing genuinely relaxed.
+    blocked; that is the one thing genuinely relaxed, **and on the contrast-free
+    path the warning has no backstop behind it** — nothing downstream looks at
+    group membership again, so an ignored warning means a declared arm carries
+    n = 0 to the end. Accepted knowingly: a missing arm is visible in the exported
+    metrics. Do not weaken that warning or drop it from `assign_groups`'s return.
 
 ### Standing verification rules — now in `CLAUDE.md`
 
@@ -204,7 +215,7 @@ pushed and reported clean. The account is in `HANDOFF-9`.
 - **The test suite was pinned to one lab's science.** Six test modules assigned the
   contrast stub's group labels while `_check_contrast_labels` read the live file,
   so writing a real pre-registration turned CI red. Fixed by
-  `DAM_CONTRASTS_PATH` + an autouse fixture pinning the suite to
+  `DAM_PREREG_PATH` + an autouse fixture pinning the suite to
   `tests/fixtures/contrasts-testfixture.yaml`. The live file now has exactly one
   test, which asserts the template refuses to load and never what it declares.
 - **A pass count without a collection count hides tests.** `114 passed, 10 skipped`

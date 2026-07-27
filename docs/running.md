@@ -43,7 +43,7 @@ install it — no path env var stands in for packaging.
 Session state is written under `~/.dam_mcp/sessions` by default; override with
 `DAM_MCP_STATE_DIR`.
 
-## Declare your contrasts first — `DAM_CONTRASTS_PATH` is required
+## Declare your contrasts first — `DAM_PREREG_PATH` is required
 
 **There is no default contrast set, and this is deliberate.**
 
@@ -54,7 +54,7 @@ like one — an MCP client showing the server as failed sends you hunting for a
 broken server rather than a missing pre-registration. Verified end-to-end against
 a real stdio server:
 
-| | `DAM_CONTRASTS_PATH` unset |
+| | `DAM_PREREG_PATH` unset |
 |---|---|
 | Server start, handshake, `tools/list` | **works** — all 14 tools register |
 | `load_experiment`, `describe_experiment`, `run_qc`, `window_tradeoff`, `set_analysis_window` | **work** |
@@ -74,7 +74,7 @@ and `run_contrast` all require groups, so in practice **the pipeline runs as far
 QC and then halts** until a real contrast file exists. That is the intended
 behaviour, not a bug — but it is worth knowing the shape of it before you see it.
 
-The refusal message names `DAM_CONTRASTS_PATH`, the template path it did *not*
+The refusal message names `DAM_PREREG_PATH`, the template path it did *not*
 load, and what to set. If you see it, you have a missing pre-registration, not a
 broken install.
 
@@ -97,10 +97,28 @@ runs. If your statistics happen outside this tool — metrics exported to Prism,
 Add `contrasts:` only if you want pre-registered comparisons executed *here*. Where
 both are present, every label a contrast names must already be in `groups:`.
 
-> **The `DAM_CONTRASTS_PATH` name is now slightly off** — the file's primary job is
-> the design, not the tests. It is deliberately not renamed: an env var is a
-> published interface and churning it would break every existing client config for
-> a cosmetic gain. See `docs/HANDOFF-9`.
+`list_contrasts` returns four things, and reports the design even when there are no
+contrasts at all:
+
+```json
+{"contrasts": [], "groups": ["ctrl", "mut"],
+ "config_path": "/abs/path/contrasts-myexp-2026-07.yaml", "warnings": []}
+```
+
+`groups` is the useful field on the contrast-free path — an empty `contrasts` list
+is the normal answer, and `groups` says what the experiment actually declares.
+Report `config_path` with any result: one server may serve several experiments, and
+which declaration was live is not otherwise recoverable from the output.
+
+> **Renamed this round: `DAM_CONTRASTS_PATH` → `DAM_PREREG_PATH`.** The old name
+> described the file's old job; with contrasts optional it was misleading. There is
+> **no back-compatibility shim** and that is deliberate — because the variable has
+> no default, a stale config refuses loudly and names the variable, instead of
+> silently loading the wrong declaration. Update your `env` blocks.
+>
+> The `list_contrasts` *tool* keeps its name even though it now returns a design
+> declaration. Tool names are pinned by the eval layer, so renaming it is a
+> separate decision. See `docs/HANDOFF-9`.
 
 `config/contrasts.yaml` in this repo is a **template** with placeholder group
 labels. It is not a pre-registration and it will not load — its `experiment:`
@@ -122,6 +140,11 @@ Rules the loader enforces, all refusing rather than guessing:
   record, and the workflow above — copy the previous timepoint and edit it — is
   exactly how that happens.
 * **Contrast labels must be a subset of `groups:`**, checked at load.
+* **`groups:` may be a list of labels or a mapping**, but a mapping's *values* are
+  never read — channel ranges reach the server only through `assign_groups`. The
+  loader **warns** when a mapping carries values, because an input that looks like
+  it does something and does not is exactly the defect class this repo removes.
+  Prefer the list form.
 * **`phase:` is `light` or `dark`; `metric:` and `test:` are closed sets too**,
   checked for every contrast at load. A typo used to resolve to `dark` silently
   and return a clean-looking result for the wrong half of the day.
@@ -135,7 +158,7 @@ failure.
 Point at the right set per run — one server can serve a whole timepoint series:
 
 ```bash
-DAM_CONTRASTS_PATH=config/contrasts-myexperiment-2026-07.yaml python -m dam_mcp.server
+DAM_PREREG_PATH=config/contrasts-myexperiment-2026-07.yaml python -m dam_mcp.server
 ```
 
 `list_contrasts` returns the resolved `config_path`, so which set was live is
@@ -144,7 +167,7 @@ recoverable from the run's own output.
 ## Run the MCP server
 
 ```bash
-DAM_CONTRASTS_PATH=config/contrasts-myexperiment-2026-07.yaml python -m dam_mcp.server
+DAM_PREREG_PATH=config/contrasts-myexperiment-2026-07.yaml python -m dam_mcp.server
 ```
 
 It speaks stdio (no OAuth — that is for remote servers). Point a client at that
@@ -153,7 +176,7 @@ analysis:
 
 ```
 MCP Inspector → command: python  args: -m dam_mcp.server
-                env:     DAM_CONTRASTS_PATH=/abs/path/to/contrasts-myexp.yaml
+                env:     DAM_PREREG_PATH=/abs/path/to/contrasts-myexp.yaml
 ```
 
 then ask it to QC an experiment folder and compute night sleep by genotype.
@@ -165,7 +188,7 @@ The environment matters here, because a client launches the server itself — an
 
 ```bash
 claude mcp add dam \
-    --env DAM_CONTRASTS_PATH=/abs/path/to/config/contrasts-myexp.yaml \
+    --env DAM_PREREG_PATH=/abs/path/to/config/contrasts-myexp.yaml \
     -- python -m dam_mcp.server
 ```
 
@@ -179,7 +202,7 @@ or, editing the JSON config directly (Claude Desktop's
       "command": "python",
       "args": ["-m", "dam_mcp.server"],
       "env": {
-        "DAM_CONTRASTS_PATH": "/abs/path/to/config/contrasts-myexp.yaml"
+        "DAM_PREREG_PATH": "/abs/path/to/config/contrasts-myexp.yaml"
       }
     }
   }

@@ -10,7 +10,7 @@
 #  config/contrasts-<experiment>.yaml, replace the labels and the experiment
 #  field with the real ones, and point the server at it:
 #
-#      DAM_CONTRASTS_PATH=config/contrasts-myexp.yaml python -m dam_mcp.server
+#      DAM_PREREG_PATH=config/contrasts-myexp.yaml python -m dam_mcp.server
 #
 #  Commit that file BEFORE the data is analysed — the commit is the
 #  pre-registration timestamp, and it is the only part of this gate that a
@@ -40,16 +40,20 @@
 # multiplicity correction is applied anywhere in this pipeline — run_contrast
 # returns a raw p-value per contrast and the server does not adjust across the set.
 #
-# Note on the env var name: DAM_CONTRASTS_PATH predates this file's primary job
-# becoming the design rather than the tests. It is deliberately not renamed —
-# see docs/HANDOFF-9.
+# The env var that points at this file is DAM_PREREG_PATH (renamed from
+# DAM_CONTRASTS_PATH once the file's primary job became the design rather than
+# the tests). No back-compat shim: with no default, a stale config refuses loudly
+# instead of loading the wrong declaration. See docs/HANDOFF-9.
 
 experiment: TEMPLATE_replace_me   # e.g. geneA-geneswitch-young-2026-07
 
 # PLACEHOLDER group labels. These must appear verbatim as keys in the mapping
 # passed to assign_groups; channel ranges are supplied there by the human at call
-# time and are NOT read from this file. A mapping of label -> notes is also
-# accepted, in which case only the keys are read.
+# time and are NOT read from this file.
+#
+# A mapping of label -> notes is also accepted, but only the KEYS are read and the
+# loader warns about any values you put under them. Do not write channel ranges
+# here expecting them to apply — they will not. Prefer this list form.
 groups:
   - geneA_EtOH
   - geneA_RU

@@ -14,7 +14,7 @@ delivered as **two pull requests**, and records one process failure worth keepin
 
 Two concerns, split into two PRs because they share no files. **PR A —
 pre-registration infrastructure**: the contrast set is now selected by
-`DAM_CONTRASTS_PATH` with *no default*, the filename must name the experiment the
+`DAM_PREREG_PATH` with *no default*, the filename must name the experiment the
 file declares, and `phase` / `metric` / `test` are closed vocabularies validated
 at load. **PR B — run attribution**: closes the gap HANDOFF-8 flagged, by stamping
 a `run_id` on every audit record and `dam.tool.*` span, handed to the server
@@ -48,13 +48,13 @@ Both halves are gone.
 
 | Commit | Contents |
 |---|---|
-| `Make the contrast set path configurable, and unpin the suite from it` | `config.config_path()` reads `DAM_CONTRASTS_PATH`, resolved per call. `list_contrasts` returns `config_path`. Autouse conftest fixture pins the suite to `tests/fixtures/contrasts-testfixture.yaml`. |
+| `Make the contrast set path configurable, and unpin the suite from it` | `config.config_path()` reads `DAM_PREREG_PATH`, resolved per call. `list_contrasts` returns `config_path`. Autouse conftest fixture pins the suite to `tests/fixtures/contrasts-testfixture.yaml`. |
 | `Mark config/contrasts.yaml as a template, not a pre-registration` | `TEMPLATE — NOT A PRE-REGISTRATION` header, `experiment: TEMPLATE_replace_me`, illustrative primary-endpoint rationale. |
-| `Require DAM_CONTRASTS_PATH; enforce filename and closed vocabularies` | No default; filename ↔ `experiment:`; `PHASES` / `METRICS` / `TESTS` validated at load; `engine._phase_label`; `docs/running.md`. |
+| `Require DAM_PREREG_PATH; enforce filename and closed vocabularies` | No default; filename ↔ `experiment:`; `PHASES` / `METRICS` / `TESTS` validated at load; `engine._phase_label`; `docs/running.md`. |
 
 ### Decisions worth knowing (do not silently reverse)
 
-1. **No default is the point, not an oversight.** Unset `DAM_CONTRASTS_PATH`
+1. **No default is the point, not an oversight.** Unset `DAM_PREREG_PATH`
    refuses. It breaks the stdio path loudly, once, at setup — the cheaper failure
    against "an unregistered comparison looked registered". `docs/running.md`
    carries the `claude mcp add --env` and `claude_desktop_config.json` fix, because
@@ -119,13 +119,31 @@ as a new legal group. The new rule is a *subset*, enforced twice:
 * assigned labels ⊆ `groups:`, checked **at assign time** — an assignment typo is
   refused where it is made.
 
-**One thing genuinely relaxed, stated plainly.** Declaring a group and not
-assigning it used to be a refusal (via the union rule); it is now a **warning** on
-`assign_groups`. A partial load — one monitor of a four-arm design — is
-legitimate, and refusing it would block real work. A contrast naming an unassigned
-arm still fails loudly in `run_contrast` ("Group 'X' has no animals with a … value").
-If that trade proves wrong, tighten the warning to a refusal; do not restore the
-union rule.
+**One thing genuinely relaxed, and the warning is unbacked on the default path.**
+Declaring a group and not assigning it used to be a refusal (via the union rule);
+it is now a **warning** on `assign_groups`. A partial load — one monitor of a
+four-arm design — is legitimate, and refusing it would block real work. Keeping
+the warning was decided deliberately.
+
+The justification first written here was wrong and is corrected: it claimed a
+contrast naming an unassigned arm "still fails loudly in `run_contrast`", implying
+a backstop behind the warning. **That backstop exists only for files that declare
+contrasts — precisely the case this change makes optional, and a contrast-free
+file is now the intended default path.** On that path nothing downstream ever
+looks at group membership again, so **the warning is the only signal there will
+ever be.** If a caller ignores it, a declared arm silently carries n = 0 through
+to the end.
+
+That was accepted knowingly, on this reasoning: a missing arm is visible
+downstream in the exported metrics — a group with no rows is not a subtle defect
+in a table someone is about to put into Prism. The warning is a convenience, not
+the last line of defence, and the last line of defence is the human reading their
+own export.
+
+Two consequences follow. Do not weaken the warning's text or drop it from
+`assign_groups`'s return; on the contrast-free path it is load-bearing in a way it
+would not be if a contrast existed. And if this trade proves wrong, tighten the
+warning to a refusal — do not restore the union rule.
 
 **Compatibility decision, made explicitly** (a file with `contrasts:` and no
 `groups:`): **refuse, do not derive.** Deriving `groups:` from the contrast labels
@@ -135,10 +153,46 @@ present — one loader with two silent semantics. The refusal names the labels t
 contrasts reference, so fixing it is a copy-paste. Blast radius in this repo is
 zero: both files carrying contrasts already declare `groups:`.
 
-**`DAM_CONTRASTS_PATH` is not renamed.** The name is now slightly off — the file's
-primary job is the design, not the tests. An env var is a published interface, and
-churning it would break every existing client config for a cosmetic gain. Noted in
-`docs/running.md` and in the template header instead.
+**Ignored values under `groups:` are now loud.** A `groups:` mapping carries values
+(`mut: {Monitor1.txt: [1, 16]}`) that the loader never reads — channel ranges reach
+the server only through `assign_groups`. Ignoring them silently is the same shape
+as the phase fallback this repo already found: an input that looks like it does
+something and does not. Someone will write ranges there and assume they applied.
+`config.declaration_warnings()` now reports them, surfaced by both `list_contrasts`
+and `assign_groups`. A mapping whose entries carry *no* value warns about nothing —
+warning where there is no ignored input just trains the reader to skip warnings.
+
+The shared test fixture was converted from the mapping shape to a plain list, so
+the suite is not permanently carrying a warning it has to filter out. The mapping
+form keeps dedicated tests with their own files.
+
+**`list_contrasts` now returns `groups` and `warnings` as well as `contrasts` and
+`config_path`.** With contrasts optional, an empty `contrasts` list is the *normal*
+response, and a reply that says only "nothing" answers a question nobody asked. The
+useful answer is what the experiment *does* declare: its legal group labels. The
+docstring says so explicitly, so a model reading an empty list computes the metrics
+and reports them rather than inventing a comparison to fill the gap.
+
+**`DAM_CONTRASTS_PATH` was renamed to `DAM_PREREG_PATH`.** The old name described
+the file's old job. Now that the file's primary content is the design and contrasts
+are optional, it was actively misleading — it told the reader the file was about
+tests.
+
+No back-compatibility shim, deliberately. Normally renaming a published env var
+demands one, but the no-default rule makes the shim unnecessary: an unset variable
+already refuses loudly and names itself, so a stale client config *fails visibly*
+rather than silently loading the wrong declaration. A shim would convert that loud
+failure into a silent success on a deprecated path, which is the exact defect class
+this repo keeps removing.
+
+**The `list_contrasts` tool was NOT renamed, and the name is now misleading.** It
+returns a design declaration of which contrasts are one optional part. It was left
+alone because tool names are pinned by the eval layer in four places — the task
+prompts in `default_tasks`, `EvalTask.requires`, the tool-sequence properties in
+`evals/properties.py`, and the tool-surface smoke test — so renaming it is a
+separate change with its own blast radius and its own re-baselining question. It
+is a real wart; it is recorded rather than hidden, and it should be decided on its
+own.
 
 ---
 
@@ -187,7 +241,7 @@ config/
                                           # each its own commit = its timestamp
 ```
 
-Selected per run: `DAM_CONTRASTS_PATH=config/contrasts-<experiment>.yaml`.
+Selected per run: `DAM_PREREG_PATH=config/contrasts-<experiment>.yaml`.
 
 **No real contrast file is included in this PR.** Genotype labels and the choice
 of primary endpoint are a human, pre-registration decision; the investigator
@@ -335,4 +389,4 @@ it partial, report `passed / skipped / collected` because uncollected modules ar
 silent where skips are loud, say "parses and validates" rather than "works" for
 anything the engine arm cannot reach, and ask before widening scope — the one
 exception granted here was repair of self-inflicted breakage where the repair was
-the correct fix anyway (`DAM_CONTRASTS_PATH`).
+the correct fix anyway (`DAM_PREREG_PATH`).

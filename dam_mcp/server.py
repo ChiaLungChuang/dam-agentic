@@ -362,6 +362,7 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
     ]
     warnings = [w for w in (_confound_warning(groups),
                             _unassigned_declared_warning(set(sizes))) if w]
+    warnings += _declaration_warnings()          # e.g. ignored values under groups:
     return GroupResult(
         session_id=session_id, group_sizes=sizes, unassigned=unassigned,
         warnings=warnings,
@@ -484,7 +485,7 @@ def apply_exclusions(
 def list_contrasts(session_id: str) -> dict:
     """List the pre-declared contrasts the agent is allowed to run.
 
-    The set is declared before the data is seen, in the file DAM_CONTRASTS_PATH
+    The set is declared before the data is seen, in the file DAM_PREREG_PATH
     points at. The model may run any contrast here and cannot invent one — this is
     pre-registration enforced by the tool boundary.
 
@@ -494,16 +495,24 @@ def list_contrasts(session_id: str) -> dict:
     empty, compute the metrics and report them — do not substitute a comparison of
     your own.
 
-    Returns each contrast's id, metric, phase, groups, test and rationale, plus
-    `config_path`: which file this came from. Report that path with any result —
-    one server may serve several experiments, and which declaration was live is not
-    otherwise recoverable from the output.
+    Returns:
+      * `contrasts` — id, metric, phase, groups, test and rationale for each;
+      * `groups`    — the legal group labels this experiment declares. These are
+        the labels assign_groups accepts, and the useful answer when `contrasts`
+        is empty: the experiment is still fully specified by its design;
+      * `config_path` — which file this came from. Report it with any result: one
+        server may serve several experiments, and which declaration was live is
+        not otherwise recoverable from the output;
+      * `warnings` — declaration problems worth a human's attention that are not
+        severe enough to refuse over.
     """
     _require(session_id)
     return {
         "session_id": session_id,
         "contrasts": config.list_contrasts(),
+        "groups": sorted(config.declared_groups()),
         "config_path": str(config.config_path()),
+        "warnings": config.declaration_warnings(),
     }
 
 
@@ -717,7 +726,7 @@ def _check_group_labels(assigned: set[str]) -> None:
 
     Not best-effort. It used to swallow a ToolError so an unreadable config never
     blocked assignment; with no default declaration file, 'unreadable' now includes
-    'DAM_CONTRASTS_PATH is unset', which means nothing is declared at all."""
+    'DAM_PREREG_PATH is unset', which means nothing is declared at all."""
     declared = config.declared_groups()
     undeclared = assigned - declared
     if undeclared:
@@ -727,6 +736,16 @@ def _check_group_labels(assigned: set[str]) -> None:
             "file's groups: key, not from the data — if that is a typo, fix the "
             "mapping; if the group is real, a human adds it to groups: first."
         )
+
+
+def _declaration_warnings() -> list[str]:
+    """Best-effort: assign_groups has already validated against the declaration by
+    the time this runs, so a read failure here cannot change the outcome and must
+    not turn a successful assignment into an error."""
+    try:
+        return config.declaration_warnings()
+    except ToolError:
+        return []
 
 
 def _unassigned_declared_warning(assigned: set[str]) -> str | None:

@@ -84,7 +84,7 @@ def test_a_groups_only_declaration_permits_the_pipeline(srv, monitor_files,
     pytest.importorskip("yaml")
     decl = tmp_path / "contrasts-designonly.yaml"
     decl.write_text("experiment: designonly\ngroups: [mut, ctrl]\n")
-    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(decl))
+    monkeypatch.setenv("DAM_PREREG_PATH", str(decl))
 
     loaded = srv.load_experiment(monitor_files, "design-only")
     sid = loaded["session_id"]
@@ -93,7 +93,50 @@ def test_a_groups_only_declaration_permits_the_pipeline(srv, monitor_files,
     res = srv.assign_groups(sid, {"mut": {"Monitor1.txt": [1, 16]},
                                   "ctrl": {"Monitor1.txt": [17, 32]}})
     assert res["group_sizes"] == {"mut": 16, "ctrl": 16}
-    assert srv.list_contrasts(sid)["contrasts"] == []      # empty, not an error
+    listed = srv.list_contrasts(sid)
+    assert listed["contrasts"] == []                       # empty, not an error
+    # An empty contrast list is the NORMAL response now, so the reply has to say
+    # what the experiment *does* declare, or it answers a question nobody asked.
+    assert sorted(listed["groups"]) == ["ctrl", "mut"]
+
+
+def test_list_contrasts_reports_the_declared_groups(srv, monitor_files):
+    pytest.importorskip("yaml")
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    listed = srv.list_contrasts(sid)
+    assert sorted(listed["groups"]) == ["CG8093_mut", "w1118_ctrl"]
+    assert listed["config_path"].endswith("contrasts-testfixture.yaml")
+
+
+def test_list_contrasts_surfaces_declaration_warnings(srv, monitor_files,
+                                                      tmp_path, monkeypatch):
+    """The mapping-values warning has to reach a caller, not just exist."""
+    pytest.importorskip("yaml")
+    decl = tmp_path / "contrasts-mapped.yaml"
+    decl.write_text("experiment: mapped\ngroups:\n"
+                    "  mut:\n    Monitor1.txt: [1, 16]\n"
+                    "  ctrl:\n    Monitor1.txt: [17, 32]\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(decl))
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    joined = " ".join(srv.list_contrasts(sid)["warnings"])
+    assert "NOT read" in joined and "assign_groups" in joined
+
+
+def test_assign_groups_surfaces_declaration_warnings(srv, monitor_files,
+                                                     tmp_path, monkeypatch):
+    """assign_groups is where someone acts on a channel range, so it is the one
+    place the 'those values did nothing' warning most needs to appear."""
+    pytest.importorskip("yaml")
+    decl = tmp_path / "contrasts-mapped.yaml"
+    decl.write_text("experiment: mapped\ngroups:\n"
+                    "  mut:\n    Monitor1.txt: [1, 16]\n"
+                    "  ctrl:\n    Monitor1.txt: [17, 32]\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(decl))
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(sid, {"mut": {"Monitor1.txt": [1, 16]},
+                                  "ctrl": {"Monitor1.txt": [17, 32]}})
+    joined = " ".join(res["warnings"])
+    assert "NOT read" in joined
 
 
 def test_unassigned_declared_group_warns_but_does_not_refuse(srv, monitor_files,
@@ -103,7 +146,7 @@ def test_unassigned_declared_group_warns_but_does_not_refuse(srv, monitor_files,
     pytest.importorskip("yaml")
     decl = tmp_path / "contrasts-four.yaml"
     decl.write_text("experiment: four\ngroups: [mut, ctrl, extra_a, extra_b]\n")
-    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(decl))
+    monkeypatch.setenv("DAM_PREREG_PATH", str(decl))
 
     sid = srv.load_experiment(monitor_files, "partial")["session_id"]
     res = srv.assign_groups(sid, {"mut": {"Monitor1.txt": [1, 16]},

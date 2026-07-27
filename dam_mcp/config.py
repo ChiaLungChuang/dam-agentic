@@ -34,7 +34,7 @@ TESTS = ("wilcoxon", "t")
 
 
 def config_path() -> Path:
-    """Which pre-registered set is in effect. DAM_CONTRASTS_PATH, and nothing else.
+    """Which pre-registered set is in effect. DAM_PREREG_PATH, and nothing else.
 
     There is deliberately **no default**. config/contrasts.yaml is a template with
     placeholder labels; falling back to it would mean an unregistered comparison
@@ -49,15 +49,15 @@ def config_path() -> Path:
     Read per call, never frozen at import: a captured path is indistinguishable
     from correct in a single-experiment process and wrong the moment a second set
     is used."""
-    env = os.environ.get("DAM_CONTRASTS_PATH")
+    env = os.environ.get("DAM_PREREG_PATH")
     if not env:
         raise ToolError(
-            "DAM_CONTRASTS_PATH is not set, so no pre-registered contrast set is "
+            "DAM_PREREG_PATH is not set, so no pre-registered contrast set is "
             "in effect and no contrast can be run. There is no default on purpose: "
             f"the file at {TEMPLATE_PATH} is a TEMPLATE with placeholder group "
             "labels, and loading it silently would let an unregistered comparison "
             "look pre-registered. Point the server at a real set, e.g. "
-            "DAM_CONTRASTS_PATH=config/contrasts-<experiment>.yaml — see "
+            "DAM_PREREG_PATH=config/contrasts-<experiment>.yaml — see "
             "docs/running.md. Every other tool works without it; only "
             "list_contrasts, run_contrast and assign_groups need it."
         )
@@ -73,8 +73,8 @@ def load_config(path: Path | None = None) -> dict:
             f"No contrast config at {path}. Contrasts must be declared before the "
             "data is seen — create that file with the pre-registered comparisons "
             "(see the example in the repo). If that is not the set you meant, "
-            "check DAM_CONTRASTS_PATH: it overrides the default location and is "
-            f"currently {os.environ.get('DAM_CONTRASTS_PATH') or 'unset'}."
+            "check DAM_PREREG_PATH: it overrides the default location and is "
+            f"currently {os.environ.get('DAM_PREREG_PATH') or 'unset'}."
         )
     try:
         import yaml
@@ -244,6 +244,29 @@ def list_contrasts(path: Path | None = None) -> list[dict]:
     """The declared contrasts, model-readable. This is the menu the agent chooses
     from — it may run any of these and nothing else."""
     return load_config(path).get("contrasts", [])
+
+
+def declaration_warnings(path: Path | None = None) -> list[str]:
+    """Things about the declaration file a reader should know but the loader will
+    not refuse over. Surfaced by list_contrasts and assign_groups.
+
+    Currently one: `groups:` written as a mapping carries values that are never
+    read. Ignoring them silently is the same shape as the phase fallback this repo
+    already found — an input that looks like it does something and does not.
+    Someone will write channel ranges there and assume they applied."""
+    data = load_config(path)
+    raw = data.get("groups")
+    if not isinstance(raw, dict):
+        return []
+    with_values = sorted(k for k, v in raw.items() if v not in (None, {}, [], ""))
+    if not with_values:
+        return []
+    return [
+        f"groups: entries {with_values} carry values under them. Those values are "
+        "NOT read — this file declares which group labels are legal, nothing more. "
+        "Channel ranges reach the server only through assign_groups, at call time. "
+        "If you expected the ranges written here to apply, they did not."
+    ]
 
 
 def declared_groups(path: Path | None = None) -> set[str]:
