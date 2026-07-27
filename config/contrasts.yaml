@@ -6,34 +6,114 @@
 # phases for significance will find some, every time, and write fluently about it.
 #
 # Add contrasts here BEFORE looking at the data.
+#
+# PRIMARY ENDPOINT: gene_effect_total_sleep_dark
+# Every other entry is secondary and exploratory. No multiplicity correction is
+# applied anywhere in this pipeline — run_contrast returns a raw p-value per
+# contrast and the server does not adjust across the declared set.
 
-experiment: EXAMPLE_replace_me
+experiment: geneA-geneswitch-young-2026-07
 
+# Group labels referenced by the contrasts below. These must appear verbatim as
+# keys in the mapping passed to assign_groups; channel ranges are supplied there
+# by the human at call time and are NOT read from this file.
 groups:
-  # channel ranges per monitor -> group label. Humans assign this. Never the model.
-  CG8093_mut:
-    Monitor1.txt: [1, 16]
-  w1118_ctrl:
-    Monitor1.txt: [17, 32]
+  - geneA_EtOH
+  - geneA_RU
+  - control_EtOH
+  - control_RU
 
 contrasts:
-  - id: mut_vs_ctrl_sleep_night
+  # ── gene_effect: [geneA_RU, geneA_EtOH] ────────────────────────────────────
+  - id: gene_effect_total_sleep_light
+    metric: total_sleep
+    phase: light
+    groups: [geneA_RU, geneA_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity.
+
+  - id: gene_effect_total_sleep_dark
     metric: total_sleep
     phase: dark
-    groups: [CG8093_mut, w1118_ctrl]
+    groups: [geneA_RU, geneA_EtOH]
     test: wilcoxon
-    rationale: Primary endpoint. Night sleep is the pre-registered comparison.
+    rationale: PRIMARY ENDPOINT.
 
-  - id: mut_vs_ctrl_bout_duration_night
+  - id: gene_effect_mean_bout_duration_light
+    metric: mean_bout_duration
+    phase: light
+    groups: [geneA_RU, geneA_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity.
+
+  - id: gene_effect_mean_bout_duration_dark
     metric: mean_bout_duration
     phase: dark
-    groups: [CG8093_mut, w1118_ctrl]
+    groups: [geneA_RU, geneA_EtOH]
     test: wilcoxon
-    rationale: Distinguishes sleep fragmentation from total sleep loss.
+    rationale: SECONDARY, exploratory, not corrected for multiplicity.
 
-  - id: mut_vs_ctrl_activity_day
+  - id: gene_effect_counts_per_waking_minute_light
     metric: counts_per_waking_minute
     phase: light
-    groups: [CG8093_mut, w1118_ctrl]
+    groups: [geneA_RU, geneA_EtOH]
     test: wilcoxon
-    rationale: Locomotor control — rules out a general activity deficit.
+    rationale: SECONDARY, exploratory, not corrected for multiplicity.
+
+  - id: gene_effect_counts_per_waking_minute_dark
+    metric: counts_per_waking_minute
+    phase: dark
+    groups: [geneA_RU, geneA_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity.
+
+  # ── ru_effect: [control_RU, control_EtOH] ──────────────────────────────────
+  # Drug-alone control in the non-driver background. Expected null throughout.
+  - id: ru_effect_total_sleep_light
+    metric: total_sleep
+    phase: light
+    groups: [control_RU, control_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity. Expected
+      null. A hit here confounds gene_effect_total_sleep_light.
+
+  - id: ru_effect_total_sleep_dark
+    metric: total_sleep
+    phase: dark
+    groups: [control_RU, control_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity. Expected
+      null. A hit here confounds gene_effect_total_sleep_dark (the primary
+      endpoint).
+
+  - id: ru_effect_mean_bout_duration_light
+    metric: mean_bout_duration
+    phase: light
+    groups: [control_RU, control_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity. Expected
+      null. A hit here confounds gene_effect_mean_bout_duration_light.
+
+  - id: ru_effect_mean_bout_duration_dark
+    metric: mean_bout_duration
+    phase: dark
+    groups: [control_RU, control_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity. Expected
+      null. A hit here confounds gene_effect_mean_bout_duration_dark.
+
+  - id: ru_effect_counts_per_waking_minute_light
+    metric: counts_per_waking_minute
+    phase: light
+    groups: [control_RU, control_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity. Expected
+      null. A hit here confounds gene_effect_counts_per_waking_minute_light.
+
+  - id: ru_effect_counts_per_waking_minute_dark
+    metric: counts_per_waking_minute
+    phase: dark
+    groups: [control_RU, control_EtOH]
+    test: wilcoxon
+    rationale: SECONDARY, exploratory, not corrected for multiplicity. Expected
+      null. A hit here confounds gene_effect_counts_per_waking_minute_dark.
