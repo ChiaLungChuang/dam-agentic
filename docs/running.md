@@ -45,10 +45,34 @@ Session state is written under `~/.dam_mcp/sessions` by default; override with
 
 ## Declare your contrasts first — `DAM_CONTRASTS_PATH` is required
 
-**There is no default contrast set, and this is deliberate.** If
-`DAM_CONTRASTS_PATH` is unset, `list_contrasts`, `run_contrast` and
-`assign_groups` refuse with a message telling you what to set. Every other tool
-(loading, QC, the `compute_*` family) works without it.
+**There is no default contrast set, and this is deliberate.**
+
+### What actually happens when it is unset
+
+**The server still starts.** This is not a startup failure, and it must not look
+like one — an MCP client showing the server as failed sends you hunting for a
+broken server rather than a missing pre-registration. Verified end-to-end against
+a real stdio server:
+
+| | `DAM_CONTRASTS_PATH` unset |
+|---|---|
+| Server start, handshake, `tools/list` | **works** — all 14 tools register |
+| `load_experiment`, `describe_experiment`, `run_qc`, `window_tradeoff`, `set_analysis_window` | **work** |
+| `list_contrasts`, `run_contrast` | **refuse**, naming the variable and the template path |
+| `assign_groups` | **refuses** — it validates group labels against the declared set |
+
+In Claude Code or Claude Desktop the server shows as **Connected**. You can load
+files and run QC. The refusal arrives the first time you try to group or contrast.
+
+Because `assign_groups` is where it stops, everything downstream of grouping stops
+too: `compute_sleep`, `compute_activity`, `compute_rhythmicity`, `compute_survival`
+and `run_contrast` all require groups, so in practice **the pipeline runs as far as
+QC and then halts** until a real contrast file exists. That is the intended
+behaviour, not a bug — but it is worth knowing the shape of it before you see it.
+
+The refusal message names `DAM_CONTRASTS_PATH`, the template path it did *not*
+load, and what to set. If you see it, you have a missing pre-registration, not a
+broken install.
 
 `config/contrasts.yaml` in this repo is a **template** with placeholder group
 labels. It is not a pre-registration and it will not load — its `experiment:`
