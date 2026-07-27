@@ -163,6 +163,20 @@ def test_record_without_a_run_id_says_unattributed_not_blank(monkeypatch, tmp_pa
     assert rec["run_id"] is not None and rec["run_id"] != ""
 
 
+def test_audit_module_never_imports_opentelemetry():
+    """Forward guard (does NOT fail on revert). The audit stream must keep writing
+    with the whole tracing stack absent — different retention, different readers,
+    and the private-inference path must not have to turn tracing off to get an
+    audit log. This is the only mechanical check of that rail; everything else
+    about it is convention."""
+    import pathlib
+
+    import dam_mcp.audit as m
+    src = pathlib.Path(m.__file__).read_text()
+    assert "opentelemetry" not in src
+    assert "from . import observability" not in src
+
+
 def test_reader_accepts_a_legacy_line_without_a_run_id(tmp_path):
     """Forward guard (does NOT fail on revert): audit.jsonl is append-only and
     long-lived, so a file written before this change must stay readable. Pins

@@ -211,6 +211,11 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
     seen). ``audit_log`` is injectable for tests; in production it is resolved from
     the environment per call so ``DAM_MCP_AUDIT_LOG`` / ``DAM_MCP_STATE_DIR`` are
     honoured without a restart.
+
+    The run id (``DAM_RUN_ID``) is read here rather than accepted as a tool
+    argument, so the model can neither see nor set the label on its own audit
+    trail. Any caller can scope a block of lines — ``DAM_RUN_ID=... python -m
+    dam_mcp.server`` from a shell or a batch job — with no eval involved.
     """
     if getattr(mcp, "_dam_instrumented", False):
         return
@@ -220,12 +225,17 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
     async def call_tool(name, arguments, context=None, convert_result=False):
         store = store_provider() if store_provider is not None else None
         sid = arguments.get("session_id") if isinstance(arguments, dict) else None
+        # Resolved per call, not hoisted out of the wrapper: a value captured once
+        # is indistinguishable from correct in a subprocess (whose environment
+        # never changes after exec), so the bug would ship looking right.
+        rid = audit.default_run_id()
         start = time.perf_counter()
         outcome, error = "ok", None
         tracer = _tracer()
         with tracer.start_as_current_span(f"dam.tool.{name}") as span:
             span.set_attribute("dam.tool", name)
             span.set_attribute("dam.session_id", sid or "")
+            span.set_attribute("dam.run_id", rid)
             try:
                 return await original(name, arguments, context=context,
                                       convert_result=convert_result)
@@ -249,7 +259,7 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
                 log = audit_log or audit.AuditLog()
                 log.record(audit.AuditRecord.now(
                     principal=audit.default_principal(),
-                    tool=name, session_id=sid,
+                    tool=name, session_id=sid, run_id=rid,
                     params=arguments if isinstance(arguments, dict) else {},
                     data_files=files, outcome=outcome, error=error,
                     duration_ms=round(duration_ms, 3),
