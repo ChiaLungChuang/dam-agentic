@@ -8,7 +8,19 @@ version = "0.1.0"
 description = "Agentic QC and analysis over Drosophila Activity Monitor data"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.0",
+    # Capped below 2.0. mcp 2.0.0 removed `mcp.server.fastmcp` outright — there is
+    # no FastMCP anywhere in the package and no `fastmcp` module; the server API is
+    # now `mcp.server.mcpserver`. That is a rewrite of dam_mcp/server.py and of the
+    # `_tool_manager.call_tool` instrumentation seam Phase 2 hangs off, not an
+    # import fix, so it is a tracked migration and not a hotfix.
+    #
+    # This is the ruff incident again, one dependency over: `mcp>=1.0` meant CI
+    # resolved whatever was newest on the day. The same tree passed on 2026-07-27
+    # with mcp 1.x and failed on 2026-07-28 with 2.0.0, having changed no code.
+    # A range rather than an exact pin: the break was a major-version API removal,
+    # and 1.x patches are not expected to move the API. (ruff is pinned exactly
+    # because its *rule set* shifts within patch releases — a different problem.)
+    "mcp>=1.0,<2",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "numpy>=1.26",
