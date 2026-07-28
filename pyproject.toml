@@ -46,7 +46,7 @@ telemetry = [
 ]
 agent = [
     "dam-agentic[telemetry]",         # the agent loop is instrumented too
-    "langgraph>=1.0", "langchain>=1.0", "langchain-mcp-adapters>=0.1",
+    "langgraph>=1.0", "langchain>=1.0", "langchain-mcp-adapters>=0.1,<0.4",
     "langchain-anthropic>=0.3",       # --provider anthropic
     "langchain-google-genai>=2.0",    # --provider google (Gemini)
     "truststore>=0.9",                # TLS via the OS trust store, not certifi
