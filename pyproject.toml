@@ -44,11 +44,30 @@ telemetry = [
     "opentelemetry-sdk>=1.20",
     "opentelemetry-exporter-otlp-proto-http>=1.20",  # OTLP -> local collector / Phoenix
 ]
+# Every runtime dependency here carries an upper bound on its major version. That
+# is policy, not taste, and it was bought twice: ruff (>=0.6 resolved to 0.16.0,
+# 57 findings on unchanged code) and mcp (>=1.0 resolved to 2.0.0, which deleted
+# mcp.server.fastmcp and turned a byte-identical tree from green to red overnight).
+# Both times the claim "the code is fine" was really a claim about a version
+# nothing had written down.
+#
+# Ranges, never exact pins. The failure mode is a major-version API removal, not
+# patch drift, so a cap keeps security and bug-fix releases flowing. ruff is the
+# one exact pin in this file, for the opposite reason: its *rule set* moves within
+# patch releases, so "ruff clean" is only meaningful against a stated version.
 agent = [
     "dam-agentic[telemetry]",         # the agent loop is instrumented too
-    "langgraph>=1.0", "langchain>=1.0", "langchain-mcp-adapters>=0.1",
-    "langchain-anthropic>=0.3",       # --provider anthropic
-    "langchain-google-genai>=2.0",    # --provider google (Gemini)
+    "langgraph>=1.0,<2", "langchain>=1.0,<2",
+    # 0.x by semver: the API may break at a MINOR bump, so `<1` is a much weaker
+    # guarantee than the caps above. Left at the major boundary as asked; if this
+    # is the next thing to break, `<0.4` is the tighter cap and it is a decision,
+    # not an oversight.
+    "langchain-mcp-adapters>=0.1,<1",
+    "langchain-anthropic>=0.3,<2",    # --provider anthropic
+    "langchain-google-genai>=2.0,<5", # --provider google (Gemini)
+    # NOT capped in this pass, deliberately: the five above were the named scope.
+    # These carry the same exposure and are listed in HANDOFF-7 as a decision to
+    # make, not an oversight to find later.
     "truststore>=0.9",                # TLS via the OS trust store, not certifi
     "python-dotenv>=1.0",             # load .env; was only arriving transitively
 ]
