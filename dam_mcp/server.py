@@ -624,26 +624,35 @@ def run_contrast(session_id: str, contrast_id: str) -> dict:
 def render_report(session_id: str, path: str, confirm: bool = False) -> dict:
     """Write the full QC + analysis report for the session to a Markdown file.
 
+    `path` is a filename inside the report directory — `DAM_REPORT_DIR`, or
+    `<state_dir>/reports` by default. A relative path is placed inside it; an
+    absolute path is accepted only if it already resolves inside it. Anything
+    outside is refused, including the pre-registered declaration, which the server
+    never writes. Pass "qc-report.md", not a full path, unless you know the
+    report directory.
+
     This writes to disk, so call once with confirm=false to preview where it will
-    go and what it contains, then again with confirm=true to write it. The report
-    is assembled from stored summaries; it invents nothing.
+    go and what it contains, then again with confirm=true to write it. The preview
+    returns the resolved destination and the report directory. The report is
+    assembled from stored summaries; it invents nothing.
     """
     session = _require(session_id)
     if not path or not str(path).strip():
         raise ToolError("render_report needs a destination path for the .md file.")
+    dest = _resolve_report_path(path)          # refuses before anything is rendered
     text = report.render_report(session)
     if not confirm:
         return {
             "session_id": session_id,
             "written": False,
-            "would_write_to": str(Path(path).resolve()),
+            "would_write_to": str(dest),
+            "report_dir": str(_report_root()),
             "preview": text[:1500],
             "message": "Preview only. Call again with confirm=true to write the file.",
         }
-    dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text)
-    return {"session_id": session_id, "written": True, "path": str(dest.resolve())}
+    return {"session_id": session_id, "written": True, "path": str(dest)}
 
 
 # ── resources ─────────────────────────────────────────────────────────────────
@@ -689,6 +698,66 @@ def contrasts(session_id: str) -> str:
 
 
 # ── internal ──────────────────────────────────────────────────────────────────
+
+def _report_root() -> Path:
+    """The only directory render_report may write into.
+
+    `DAM_REPORT_DIR` if set, else `<state_dir>/reports`, so reports travel with
+    the sessions they describe. Resolved per call: a captured root is
+    indistinguishable from correct until someone changes the variable."""
+    env = os.environ.get("DAM_REPORT_DIR")
+    root = Path(env) if env else Path(STORE.state_dir) / "reports"
+    return root.expanduser().resolve()
+
+
+def _resolve_report_path(path: str) -> Path:
+    """Resolve a caller-supplied report path, or refuse.
+
+    render_report used to write to any path the server process could reach, which
+    made it an arbitrary file write: the pre-registration, the audit log, session
+    state, anything. The red team demonstrated it against the declaration
+    (HANDOFF-10 Finding 1), but the declaration was only the path that happened to
+    be attacked — so the fix closes the general form rather than that one target.
+
+    Containment is checked **after** `resolve()`, which is the part that matters:
+    resolve() collapses `..` and follows symlinks, so a path that traverses or
+    symlinks its way out is caught. A prefix check on the raw string would not be.
+
+    A relative path is interpreted inside the report root rather than refused —
+    `render_report(path="qc.md")` is the ergonomic call and there is no reason to
+    make it an error."""
+    root = _report_root()
+    candidate = Path(str(path)).expanduser()
+    dest = (candidate if candidate.is_absolute() else root / candidate).resolve()
+
+    if not dest.is_relative_to(root):
+        raise ToolError(
+            f"render_report may only write inside {root}, and '{path}' resolves to "
+            f"{dest}, which is outside it. This is a boundary, not a mistake to "
+            "work around: the tool used to accept any path, which made it an "
+            "arbitrary file write — it could overwrite the pre-registration, the "
+            "audit log, or session state. Pass a filename (e.g. 'qc-report.md') to "
+            "write inside the report directory, or set DAM_REPORT_DIR if the "
+            "reports belong somewhere else."
+        )
+
+    # Belt and braces, and the reason config.py can state that nothing in the
+    # server writes the declaration: refuse the pre-registration explicitly, so the
+    # claim survives even a DAM_REPORT_DIR pointed at the config directory.
+    try:
+        declaration = config.config_path().expanduser().resolve()
+    except ToolError:
+        declaration = None                     # nothing declared: nothing to protect
+    if declaration is not None and dest == declaration:
+        raise ToolError(
+            f"render_report will not write to {dest}: that is the pre-registered "
+            "declaration in effect. It is read-only to the server by design — the "
+            "commit that introduced it is the pre-registration timestamp, and a "
+            "tool that can overwrite it makes that record worthless. Amending a "
+            "declaration is a human, out-of-band step."
+        )
+    return dest
+
 
 def _guard_ready(session) -> None:
     if not session.qc:
