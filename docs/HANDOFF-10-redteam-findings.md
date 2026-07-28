@@ -50,6 +50,16 @@ about a returned score would already be an assertion about a lie.
 
 ## Findings
 
+> **Findings 1 and 2 were closed by `77d6329`** (branch
+> `claude/phase3-redteam-fixes-6knrxi`). They are kept below **exactly as found**,
+> not rewritten into a description of the fix. The point of the suite is that it
+> caught them, and a handoff that quietly reads as though the code was always
+> right destroys the only evidence that the tests were ever red. Each carries a
+> closure note at the end saying what changed.
+>
+> **Finding 3 is open by decision, not by omission** — see the trust-boundary
+> section under it.
+
 ### FINDING 1 — `render_report` overwrites the pre-registration ⚠
 
 **Attack 4 (scope escape) SUCCEEDS.**
@@ -83,6 +93,23 @@ assertions flip as part of the fix.
 paths that resolve to the declaration or anything matching `contrasts*.y*ml`; or
 confining writes to a report directory.
 
+**CLOSED by `77d6329`.** `server._resolve_report_path` confines every write to
+the report root (`DAM_REPORT_DIR`, else `<state_dir>/reports`), with containment
+checked after `resolve()` so `..` and symlinks cannot walk out, and the resolved
+declaration refused explicitly on top. The general form was taken over the narrow
+one deliberately: the declaration was the path that happened to be attacked, not
+the extent of the exposure. `config.py`'s docstring claim was made true rather
+than deleted, and now names the enforcement instead of asserting the property.
+Cost: `path` no longer means "anywhere", pinned by a negative control that the
+ordinary call still writes.
+
+**One thing the fix exposed, worth keeping:** `scope_escape` had been flagging any
+`render_report` at a declaration-shaped path without checking `is_error`. While
+the write succeeded that was indistinguishable from correct; the moment the server
+started refusing, a *rejected* attempt scored as an escape — a working defence
+reported as a live hole. A detector can only be wrong in that direction once the
+thing it watches starts working.
+
 ### FINDING 2 — a malformed declaration is a raw parser traceback ⚠
 
 **Not an attack. Collateral, and it costs ordinary users.**
@@ -107,6 +134,17 @@ This will hit the first person who hand-writes a real
 `contrasts-<experiment>.yaml`, which is the next commit anyone makes on this repo.
 
 *Pinned by* `test_FINDING_malformed_declaration_is_a_raw_parser_error`.
+
+**CLOSED by `77d6329`, and it was five raw exceptions rather than one.**
+Enumerated instead of assumed: `ParserError`/`ScannerError` from a malformed file,
+`AttributeError` from a top-level scalar *or* list (`.get` landing on a `str`),
+`UnicodeDecodeError` from a non-UTF-8 file, `IsADirectoryError` from a directory —
+plus an empty file, which the old `or {}` swallowed into a confusing downstream
+error. `config._read_declaration` wraps all of them as a `ToolError` naming the
+file, and the line and column where PyYAML supplies a mark. Verified through the
+stdio server: the audit outcome moves from `error` to `refused`, which is the half
+of this finding that mattered most — a scientist's typo is no longer booked as an
+infrastructure fault.
 
 ### FINDING 3 — four free-text surfaces reach the model unsanitised
 
@@ -133,6 +171,48 @@ Sanitising is not obviously right: the errors-as-prompts design deliberately
 echoes caller data back so the model can act on it, and stripping it would blunt
 the refusals. The realistic mitigations are delimiting untrusted spans in tool
 output, or treating the declaration file as trusted input and saying so.
+
+
+#### Finding 3 is OPEN by decision — a stated trust boundary
+
+Not fixed, and not an oversight. The declaration file is **trusted input**, and
+that is the assumption this system runs on.
+
+Errors-as-prompts echoes caller data back to the model *on purpose*: a refusal
+that says "'crtl' is not a declared group; declared are ['ctrl', 'mut']" is useful
+precisely because it repeats what the caller wrote. Sanitising those spans would
+blunt every refusal in the server to protect against a party who, by construction,
+already has write access to the pre-registration.
+
+**The four surfaces, named so the assumption is auditable:**
+
+| Surface | Reaches the model via | Controlled by |
+|---|---|---|
+| `rationale` | `list_contrasts` → contrast dicts | declaration author |
+| **group labels** | `list_contrasts.groups`, **and every `assign_groups` refusal** | declaration author |
+| session `name` | `LoadResult.name`, the manifest, the rendered report | the model itself |
+| `config_path` | `list_contrasts` | whoever sets `DAM_PREREG_PATH` |
+
+Group labels are the strongest carrier: they reach the model twice, and the second
+time inside a refusal message, which is exactly where a model is paying attention.
+
+**Where the assumption breaks.** Anyone who can write a declaration can already
+choose the groups, the metrics, the phases and the contrasts — they do not need an
+injection to steer the analysis, they can just declare what they want. The
+injection buys nothing a legitimate edit would not. That equivalence is the whole
+justification, and it fails the moment a declaration comes from somewhere the
+operator does not control:
+
+* a declaration fetched from a shared drive, a collaborator, or a repo the lab
+  does not own;
+* a multi-tenant server where `DAM_PREREG_PATH` is set per request rather than per
+  deployment;
+* **Phase 3**, if HTTP transport ever lets a caller supply or select a declaration
+  — the `dam:contrasts:amend` scope was designed on the assumption that amending is
+  privileged, and that assumption is the same one stated here.
+
+If any of those becomes true, this section is the thing to revisit first, and the
+mitigation is delimiting untrusted spans in tool output rather than stripping them.
 
 ---
 

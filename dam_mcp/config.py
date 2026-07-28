@@ -1,10 +1,24 @@
 """Read-only access to the pre-declared contrast set.
 
-The whole point (spec, CLAUDE.md): the agent may run any contrast in
-config/contrasts.yaml and cannot invent one. Pre-registration enforced by the
-tool boundary, not by discipline. This module only *reads* the file — nothing in
-the server writes it — and validates that each contrast is well-formed before the
-model is allowed to pick one.
+The whole point (spec, CLAUDE.md): the agent may run any contrast in the
+declaration and cannot invent one. Pre-registration enforced by the tool boundary,
+not by discipline. This module only *reads* the file, and validates that each
+contrast is well-formed before the model is allowed to pick one.
+
+**Nothing in the server writes the declaration.** That sentence used to be here as
+a claim about this module and was read as a claim about the server, which was
+false: `render_report` accepted any path and would overwrite the declaration
+(HANDOFF-10 Finding 1). It is true again, and enforced rather than asserted —
+`server._resolve_report_path` confines every write to the report directory and
+refuses the resolved declaration path outright. If a third write path is ever
+added, that enforcement is what has to be extended; this docstring is not the
+control.
+
+Every failure reading or parsing the file is a **caller** error and leaves as a
+ToolError, never a raw exception (`_read_declaration`). That is not cosmetic: a
+ToolError audits as `refused` — a guard firing — while a raw exception audits as
+`error`, the shadow of an infrastructure fault, and errors the span. Unwrapped, a
+YAML typo in someone's pre-registration read as a crashing server.
 """
 
 from __future__ import annotations
@@ -85,7 +99,7 @@ def load_config(path: Path | None = None) -> dict:
             "other tool works without it; only list_contrasts and run_contrast need it."
         ) from None
 
-    data = yaml.safe_load(path.read_text()) or {}
+    data = _read_declaration(path, yaml)
     _check_experiment_matches_filename(data, path)
     groups = _parse_groups(data, path)
 
@@ -171,6 +185,74 @@ def _check_contrast_groups_are_declared(c: dict, groups: set[str],
             "only compare groups the design declares — if that is a typo, fix the "
             "contrast; if the group is real, add it to groups: first."
         )
+
+
+def _read_declaration(path: Path, yaml) -> dict:
+    """Read and parse the declaration, or refuse with an actionable message.
+
+    Every failure here is a **caller** problem — a typo, the wrong path, a
+    directory — and must reach the model as a ToolError, for two reasons that both
+    bit (HANDOFF-10 Finding 2):
+
+      * errors-as-prompts. A raw `yaml.parser.ParserError` names no file, does not
+        say it is the declaration, and tells a model nothing to do next.
+      * the outcome taxonomy. A ToolError audits as `refused` — a guard firing, a
+        defensive success. A raw exception audits as `error`, the shadow of an
+        *infrastructure fault*, and errors the span. Unwrapped, a scientist's YAML
+        typo was booked as a crashing server.
+
+    Five distinct raw exceptions were escaping, not one: ParserError/ScannerError
+    from a malformed file, AttributeError from a top-level scalar *or* list (the
+    `.get` lands on a str), UnicodeDecodeError from a non-UTF-8 file, and
+    IsADirectoryError from a path that is a directory."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ToolError(
+            f"{path} is not valid UTF-8 text, so it cannot be a declaration file "
+            f"({exc.reason} at byte {exc.start}). Check DAM_PREREG_PATH points at "
+            "the YAML file and not at a binary or a compiled artifact."
+        ) from None
+    except IsADirectoryError:
+        raise ToolError(
+            f"{path} is a directory, not a declaration file. DAM_PREREG_PATH must "
+            "name the .yaml file itself, e.g. config/contrasts-<experiment>.yaml."
+        ) from None
+    except OSError as exc:
+        raise ToolError(
+            f"{path} could not be read: {exc.strerror or exc}. Check the path and "
+            "its permissions; DAM_PREREG_PATH is currently "
+            f"{os.environ.get('DAM_PREREG_PATH') or 'unset'}."
+        ) from None
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        # PyYAML marks are 0-based; editors count from 1.
+        where = (f" at line {mark.line + 1}, column {mark.column + 1}"
+                 if mark is not None else "")
+        problem = getattr(exc, "problem", None) or "could not be parsed"
+        raise ToolError(
+            f"{path} is not valid YAML{where}: {problem}. This is the "
+            "pre-registered declaration, so nothing can run until it parses. The "
+            "commonest cause is an unclosed bracket or a bad indent — open the "
+            "file at that line."
+        ) from None
+
+    if data is None:
+        raise ToolError(
+            f"{path} is empty. A declaration needs at least 'experiment:' and "
+            "'groups:'; contrasts are optional."
+        )
+    if not isinstance(data, dict):
+        raise ToolError(
+            f"{path} parses as a {type(data).__name__}, not a mapping. A "
+            "declaration is a mapping with 'experiment:' and 'groups:' keys at the "
+            "top level — check the indentation and that the file is not a bare "
+            "list or a single value."
+        )
+    return data
 
 
 def _check_experiment_matches_filename(data: dict, path: Path) -> None:

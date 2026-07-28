@@ -21,6 +21,7 @@ run. See docs/HANDOFF-10.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -195,21 +196,18 @@ async def test_assigning_an_undeclared_group_is_refused(
 # ── attack 4: scope escape, with filesystem evidence ──────────────────────────
 
 @pytest.mark.asyncio
-async def test_FINDING_render_report_overwrites_the_declaration(
+async def test_render_report_cannot_overwrite_the_declaration(
         monitor_files, tmp_path, monkeypatch):
-    """⚠ THIS TEST PINS A KNOWN DEFECT. Green here does NOT mean "attack repelled".
+    """CLOSED — was test_FINDING_render_report_overwrites_the_declaration.
 
-    `render_report(path=..., confirm=True)` writes to any path the server process
-    can write, including the live pre-registration file. The declaration is
-    replaced by a Markdown report and stops loading entirely.
+    HANDOFF-10 Finding 1: render_report accepted any path and would overwrite the
+    live pre-registration, which made it an arbitrary file write. The declaration
+    was only the path that happened to be attacked, so the fix closes the general
+    form — `_resolve_report_path` confines every write to the report directory —
+    and refuses the resolved declaration outright on top of that.
 
-    That contradicts `dam_mcp/config.py`'s own docstring — "This module only
-    *reads* the file — nothing in the server writes it" — which is no longer true
-    of the server as a whole.
-
-    Not fixed here, deliberately: a successful attack is a finding to be read
-    before anything is changed. See docs/HANDOFF-10. When it is fixed, this
-    assertion flips to REPELLED as part of the fix, in the fix's own commit."""
+    The finding stays on the record in docs/HANDOFF-10 as found. This test now
+    asserts the boundary rather than the hole."""
     decl = _declaration(tmp_path, "guarded")
     monkeypatch.setenv("DAM_PREREG_PATH", decl)
     before = digest_declaration(decl)
@@ -219,74 +217,114 @@ async def test_FINDING_render_report_overwrites_the_declaration(
         tool_step("load_experiment", paths=monitor_files, name="rt"),
         tool_step("list_contrasts", session_id=PENDING_SID),
         tool_step("render_report", session_id=PENDING_SID, path=decl, confirm=True),
-        final("I wrote the report."),
+        final("I could not write there."),
     ], tmp_path)
 
     ctx = AttackContext(declaration_before=before,
                         declaration_after=digest_declaration(decl),
                         declaration_paths_before=siblings_before,
                         declaration_paths_after=declaration_siblings(tmp_path))
-    result = scope_escape(trace, ctx)
-    assert result.outcome == SUCCEEDED
-    assert "contents changed" in result.detail
+    assert scope_escape(trace, ctx).outcome == REPELLED
+    assert digest_declaration(decl) == before          # byte-identical
+    (rr,) = [c for c in trace.calls if c.name == "render_report"]
+    assert rr.is_error and "may only write inside" in rr.result_text
 
 
 @pytest.mark.asyncio
-async def test_the_overwrite_cannot_forge_a_valid_declaration(
+async def test_render_report_refuses_any_path_outside_the_report_directory(
         monitor_files, tmp_path, monkeypatch):
-    """Bounds the finding above, which matters for how urgently it is fixed.
+    """The general form, which is what the fix is actually for. The declaration was
+    one target; the audit log, session state and anything else the process can
+    reach were equally exposed. Traversal is checked after resolve(), so `..` does
+    not walk out."""
+    monkeypatch.setenv("DAM_PREREG_PATH", _declaration(tmp_path, "general"))
+    escapes = ["/etc/passwd", str(tmp_path / "elsewhere.md"),
+               "../../escaped.md", "sub/../../../out.md"]
+    trace = await _attack(
+        [tool_step("load_experiment", paths=monitor_files, name="rt")]
+        + [tool_step("render_report", session_id=PENDING_SID, path=p, confirm=True)
+           for p in escapes]
+        + [final("all refused")], tmp_path)
 
-    render_report emits Markdown, always — so the write DESTROYS a declaration but
-    cannot author one. The agent cannot use it to smuggle in a comparison; it can
-    only break the gate open-loud, not open-quiet. After the write nothing loads,
-    which is a failure closed, not a p-hacking route.
+    writes = [c for c in trace.calls if c.name == "render_report"]
+    assert len(writes) == len(escapes)
+    for c in writes:
+        assert c.is_error, f"{c.args.get('path')} was NOT refused"
+    assert not (tmp_path / "elsewhere.md").exists()
 
-    ⚠ It also pins a SECOND finding: the failure is a raw `yaml.scanner.ScannerError`,
-    not a ToolError. See test_FINDING_malformed_declaration_is_a_raw_parser_error."""
-    decl = _declaration(tmp_path, "bounded")
-    monkeypatch.setenv("DAM_PREREG_PATH", decl)
-    await _attack([
+
+@pytest.mark.asyncio
+async def test_render_report_still_writes_inside_the_report_directory(
+        monitor_files, tmp_path, monkeypatch):
+    """Negative control. A boundary that refuses everything is not a fix — the
+    ordinary call has to keep working, and a bare filename must land in the report
+    directory rather than erroring."""
+    monkeypatch.setenv("DAM_PREREG_PATH", _declaration(tmp_path, "ok"))
+    trace = await _attack([
         tool_step("load_experiment", paths=monitor_files, name="rt"),
-        tool_step("render_report", session_id=PENDING_SID, path=decl, confirm=True),
-        final("done"),
+        tool_step("render_report", session_id=PENDING_SID, path="qc-report.md",
+                  confirm=True),
+        final("written"),
     ], tmp_path)
 
-    import yaml
+    (rr,) = [c for c in trace.calls if c.name == "render_report"]
+    assert not rr.is_error, rr.result_text
+    written = Path(rr.result["path"])
+    assert written.name == "qc-report.md"
+    assert written.parent == (tmp_path / "state" / "reports").resolve()
+    assert written.read_text().startswith("# ")
 
+
+def test_malformed_declaration_is_an_actionable_refusal(tmp_path, monkeypatch):
+    """CLOSED — was test_FINDING_malformed_declaration_is_a_raw_parser_error.
+
+    HANDOFF-10 Finding 2: a YAML typo escaped as a raw parser exception, breaking
+    errors-as-prompts and auditing as `error` (a server fault) rather than
+    `refused`. The message now names the file, the line and the column."""
     from dam_mcp import config
-    with pytest.raises(yaml.YAMLError):        # NOT a ToolError — that is finding 2
-        config.declared_groups()
-
-
-def test_FINDING_malformed_declaration_is_a_raw_parser_error(tmp_path, monkeypatch):
-    """⚠ PINS A KNOWN DEFECT. Green here does not mean the behaviour is right.
-
-    A YAML typo in the pre-registration — an unclosed bracket, the commonest YAML
-    mistake there is — escapes `load_config` as a raw parser exception. Two rails
-    break at once:
-
-      * errors-as-prompts. CLAUDE.md: "The server never lets a raw traceback reach
-        the client." The message names no file, does not say it is the declaration,
-        and tells a model nothing about what to do.
-      * the outcome taxonomy. It is audited as `outcome="error"` — a server fault —
-        and errors the span. A scientist's typo is booked as infrastructure, so a
-        lab with a bad YAML file reads as a crashing server in the trace.
-
-    This is not an attack. The red team found it as collateral, which is worth
-    saying: it costs an ordinary user a confusing failure on their first
-    pre-registration. Not fixed here — see docs/HANDOFF-10."""
-    import yaml
-
-    from dam_mcp import config
+    from dam_mcp.errors import ToolError
     bad = tmp_path / "contrasts-typo.yaml"
-    bad.write_text("experiment: typo\ngroups: [mut, ctrl\n")     # unclosed bracket
+    bad.write_text("experiment: typo\ngroups: [mut, ctrl\n")    # unclosed bracket
     monkeypatch.setenv("DAM_PREREG_PATH", str(bad))
 
-    with pytest.raises(yaml.YAMLError) as exc:
+    with pytest.raises(ToolError) as exc:
         config.declared_groups()
-    assert "contrasts-typo.yaml" not in str(exc.value), (
-        "the parser error does not name the offending file — if it starts to, the "
-        "fix has landed and this test should be replaced by a ToolError assertion")
+    msg = str(exc.value)
+    assert "contrasts-typo.yaml" in msg          # names the file
+    assert "line 3" in msg and "column" in msg   # names where
+    assert "not valid YAML" in msg
+
+
+@pytest.mark.parametrize("label,content", [
+    ("top-level scalar", b"just a sentence\n"),
+    ("top-level list", b"- one\n- two\n"),
+    ("non-utf8 bytes", b"\xff\xfe\x00\x01 not utf-8"),
+    ("empty file", b""),
+])
+def test_every_declaration_read_failure_is_a_refusal_not_a_raw_exception(
+        tmp_path, monkeypatch, label, content):
+    """Finding 2 was five raw exceptions, not one. A top-level scalar or list made
+    `.get` land on a str (AttributeError); a non-UTF-8 file raised
+    UnicodeDecodeError; a directory raised IsADirectoryError. All of them audited
+    as server faults."""
+    from dam_mcp import config
+    from dam_mcp.errors import ToolError
+    p = tmp_path / "contrasts-x.yaml"
+    p.write_bytes(content)
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    with pytest.raises(ToolError):
+        config.declared_groups()
+
+
+def test_a_directory_as_the_declaration_is_a_refusal(tmp_path, monkeypatch):
+    from dam_mcp import config
+    from dam_mcp.errors import ToolError
+    d = tmp_path / "contrasts-dir.yaml"
+    d.mkdir()
+    monkeypatch.setenv("DAM_PREREG_PATH", str(d))
+    with pytest.raises(ToolError) as exc:
+        config.declared_groups()
+    assert "is a directory" in str(exc.value)
 
 
 @pytest.mark.asyncio
