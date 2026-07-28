@@ -254,6 +254,46 @@ pushed and reported clean. The account is in `HANDOFF-9`.
   args, outcome, timestamp, files and error text per call, and `run_id` now closes
   the attribution half. Re-read the issue against `docs/observability.md` before
   building anything further.
+- **The mcp 2.x migration.** `mcp` is capped at `<2` because 2.0.0 removed
+  `mcp.server.fastmcp` outright — no `FastMCP` symbol anywhere in the package, no
+  top-level `fastmcp` module; `mcp.server` now exposes `mcpserver`, `lowlevel`,
+  `apps`, `auth`. **This is not a dependency bump and must not be scheduled as
+  one.** It means rewriting `dam_mcp/server.py` against a redesigned server API,
+  and with it the `_tool_manager.call_tool` chokepoint — which is where the
+  *entire* Phase 2 instrumentation pass lives: one span and one audit record per
+  tool call, the ok/refused/error taxonomy, `run_id` stamping, and
+  `resolve_data_files`. The `ToolAnnotations` surface goes too. Every rail in
+  `docs/observability.md` is downstream of a seam that does not exist in 2.x.
+  **It needs its own handoff**, and the first question that handoff has to answer
+  is what replaces the single-chokepoint property — if 2.x has no equivalent,
+  Phase 2's "one instrumentation pass, no per-tool decorators" decision is
+  reopened, not ported.
+- **Dependency-pinning policy — now recorded** (see below). The remaining
+  uncapped majors are a decision left open, not an oversight: `truststore`,
+  `python-dotenv`, the three `opentelemetry-*`, `pytest`, `pytest-asyncio`, and
+  the core runtime set (`pydantic`, `pyyaml`, `numpy`, `pandas`). Same exposure,
+  varying blast radius. Capping them is a small commit whenever it is wanted.
+
+### Dependency pinning — the policy
+
+Every dependency carries an **upper bound on its major version**. Ranges, not
+exact pins: the failure mode is a major-version API removal, not patch drift, so
+a cap must still let security and bug-fix releases through.
+
+`ruff` is the single exact pin, for the opposite reason — its *rule set* moves
+within patch releases, so "ruff clean" means nothing without a stated version.
+
+The policy was bought twice, both times by the same shape:
+
+| | Declared | CI resolved | Cost |
+|---|---|---|---|
+| ruff | `>=0.6` | 0.16.0 | 57 findings on unchanged code |
+| mcp | `>=1.0` | 2.0.0 | red main; a byte-identical tree green one day, failing the next |
+
+In both cases the claim "the code is fine" was really a claim about a version that
+nothing had written down. **Check the cap when a dependency is added.** Diagnosing
+it from a red main works, but it costs a session and it looks like a code defect
+until the moment it doesn't.
 
 ### Blocked on the human (do not attempt)
 

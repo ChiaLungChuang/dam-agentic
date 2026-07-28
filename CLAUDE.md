@@ -223,6 +223,17 @@ and validating — is unverified there. Say "parses and validates", never "works
 looks necessary and obvious. The one exception already granted: repair of
 breakage you caused yourself, where the repair is the correct fix anyway.
 
+**An unpinned major is a claim about a version, not about the code. Check the cap
+when a dependency is added.** This shape has now happened twice: `ruff>=0.6`
+resolved to 0.16.0 and reported 57 findings on unchanged code; `mcp>=1.0` resolved
+to 2.0.0, which deleted `mcp.server.fastmcp` and turned a byte-identical tree from
+green to red overnight. Both looked like code defects until the diff came back
+empty. Every dependency gets an upper bound on its major version — a range, since
+the failure mode is API removal rather than patch drift — and `ruff` is the one
+exact pin because its rule set moves within patches. Diagnosing this from a red
+main works and costs a session; the check at the point of adding costs nothing.
+Policy and the current uncapped set: `docs/HANDOFF-7-current-state.md`.
+
 Longer account, with the specific failures: `docs/HANDOFF-9-preregistration-and-run-attribution.md`.
 
 ## Lint policy
