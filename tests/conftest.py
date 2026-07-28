@@ -22,7 +22,7 @@ FIXTURE_CONTRASTS = (
 
 
 # The contrast set is a scientific artifact belonging to whoever runs this server,
-# not a test fixture. Before DAM_CONTRASTS_PATH existed the suite read the live
+# not a test fixture. Before DAM_PREREG_PATH existed the suite read the live
 # config/contrasts.yaml directly, so replacing the EXAMPLE stub with a real
 # pre-registration turned ten tests red — the suite was pinned to one lab's
 # groups. Point every test at a fixture instead; the live file gets exactly one
@@ -30,7 +30,7 @@ FIXTURE_CONTRASTS = (
 # checks that it parses without caring what is in it.
 @pytest.fixture(autouse=True)
 def _pin_contrasts_to_fixture(monkeypatch):
-    monkeypatch.setenv("DAM_CONTRASTS_PATH", str(FIXTURE_CONTRASTS))
+    monkeypatch.setenv("DAM_PREREG_PATH", str(FIXTURE_CONTRASTS))
 
 
 # Session-scoped: the synthetic monitor files are read-only, so generating them

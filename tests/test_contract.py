@@ -99,7 +99,10 @@ async def test_assign_groups_refuses_labels_not_in_config(tmp_path, monitor_file
                          mapping={"foo": {"Monitor1.txt": [1, 16]},
                                   "bar": {"Monitor1.txt": [17, 32]}})
         assert r.is_error
-        assert "declared contrasts" in r.text
+        # Names the undeclared labels and what is declared instead — the check now
+        # runs against groups:, not the contrast set (HANDOFF-9 reversal).
+        assert "'foo'" in r.text and "'bar'" in r.text
+        assert "CG8093_mut" in r.text
 
 
 # ── the HITL gate previews before it acts ─────────────────────────────────────

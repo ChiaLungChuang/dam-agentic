@@ -1,29 +1,49 @@
 # HANDOFF-7 — current state
 
-**Written:** 2026-07-25 · **At commit:** `9d7f561` · **Branch:** `main` (pushed to
+**Rewritten:** 2026-07-27 · **At commit:** `48e4a31` · **Branch:** `main` (pushed to
 `origin`, https://github.com/ChiaLungChuang/dam-agentic)
 
 For a session with no memory of the work that produced this. Read `CLAUDE.md`
 first — it holds the architectural rails and is the document that must not be
 contradicted.
 
-Unlike its predecessors this handoff is not a plan: HANDOFF-3 through
-HANDOFF-6 each set out work to do, and this one records where that work
-actually ended up. The earlier documents (`HANDOFF-3` … `HANDOFF-6` +
-`HANDOFF-6-amendment-1`) remain worth reading for the reasoning behind
-decisions only summarised here.
+**This file is a record, not a plan.** It says where work ended up. The plan
+documents are `HANDOFF-6` (the four-phase security/deployment arc) and
+`HANDOFF-9` (this round's reasoning, in full). Where they disagree with this file
+about *why*, they win; this file is the index.
+
+> **Superseded branch.** `claude/phase3-observability-review-6knrxi` is dead. Its
+> work reached `main` as two separate branches — `claude/phase3-prereg-infrastructure`
+> (PR #4) and `claude/phase3-run-attribution` (PR #5), merged in that order with
+> merge commits. Do not branch from it or resurrect it.
 
 ---
 
 ## Status in one paragraph
 
 The MCP server (`dam_mcp/`) is complete and operated: 14 tools, 4 resources,
-driven end-to-end by MCP Inspector, by Claude Code, by a scripted fake model, and
-by a real LLM. The eval harness (`evals/`) is the differentiated part of this
-project — Layer 1 drives the server over the protocol, Layer 2 scores an agent's
-behaviour over its trace. **HANDOFF-6 Phase 0 is closed** (evidence:
-`docs/phase0-eval-report.md`). Phases 1–4 of HANDOFF-6 have not been started.
-**103 tests pass, `ruff==0.16.0` clean, CI green on 3.11/3.12/3.13.**
+driven end-to-end by MCP Inspector, Claude Code, a scripted fake model, and a real
+LLM. The eval harness (`evals/`) remains the differentiated part. **HANDOFF-6
+Phase 0 and Phase 2 are closed and merged.** Since HANDOFF-7's first version, two
+more rounds landed: **pre-registration infrastructure** (the contrast set is now
+selected, validated and gated) and **run attribution** (every audit line names the
+run that produced it). **185 tests pass, 0 skipped with the engine installed,
+`ruff==0.16.0` clean, CI green on 3.11/3.12/3.13.** Phase 1 (Ollama) and Phases 3–4
+are not started; Phase 3 is still gated.
+
+---
+
+## Merge history — what is actually in `main`
+
+| PR | Merged as | Contents |
+|---|---|---|
+| #3 | `fcfce4b` | HANDOFF-6 **Phase 2** — OTel spans + audit stream over one dispatch seam |
+| #4 | `5254f7f` | Pre-registration infrastructure — `DAM_PREREG_PATH`, filename↔experiment, closed vocabularies |
+| #5 | `48e4a31` | Run attribution — `run_id` on every audit record and tool span |
+
+#4 and #5 touch **no file in common** and each passes standalone on `main`;
+verified by intersecting their changed-file lists, and by the count arithmetic
+(`164 + 148 − 127 = 185`).
 
 ---
 
@@ -33,139 +53,178 @@ behaviour over its trace. **HANDOFF-6 Phase 0 is closed** (evidence:
 |---|---|
 | Repo | `~/projects/dam-agentic` |
 | Python | **use `.venv/bin/python`** — the system `python3` is 3.9 and too old |
-| Analysis engine | `rtivity-python`, installed **editable** from `~/Rtivity-Python` (currently clean at tag `v0.12.0`) |
-| Engine version string | `pip show rtivity-python` reports **0.11.0**. This is a known, still-open mismatch: the `v0.12.0` tag was created without bumping `version=`. Not a stale install. |
-| Session state | `DAM_MCP_STATE_DIR` overrides the default `~/.dam_mcp/sessions`. **Set it to a temp dir when running evals or tests**, or you will pollute real state. |
+| Analysis engine | `rtivity-python`, installed **editable** from `~/Rtivity-Python` (clean at tag `v0.12.0`) |
+| Engine version string | `pip show rtivity-python` reports **0.11.0**. Known, still-open mismatch: the `v0.12.0` tag was created without bumping `version=`. Not a stale install. |
+| **Contrast set** | **`DAM_PREREG_PATH` is required and has no default.** See below — this is the one setup step that did not exist before. |
+| Session state | `DAM_MCP_STATE_DIR` overrides `~/.dam_mcp/sessions`. **Set it to a temp dir for evals/tests**, or you will pollute real state. |
+| Audit log | `DAM_MCP_AUDIT_LOG`, else `<state_dir>/audit.jsonl`. `DAM_RUN_ID` labels the lines. |
 | Model credentials | repo-root `.env` (gitignored), loaded by `agent.graph.load_env()`. `GOOGLE_API_KEY` is set. |
-| TLS | This machine sits behind institutional TLS inspection: Python HTTPS fails `CERTIFICATE_VERIFY_FAILED` while `curl` succeeds. `truststore` fixes it and is already wired into `build_agent`. **Never** use `verify=False`. |
-| Lint | `ruff==0.16.0` pinned, `select = ["E4","E7","E9","F"]`. Do not widen opportunistically. `DTZ001/DTZ007` are **rejected** for analysis code on domain grounds (DAM data carries no timezone); telemetry timestamps are a different case and should be tz-aware UTC. |
+| TLS | Institutional TLS inspection: Python HTTPS fails `CERTIFICATE_VERIFY_FAILED` while `curl` succeeds. `truststore` fixes it and is wired into `build_agent`. **Never** `verify=False`. |
+| Lint | `ruff==0.16.0` pinned, `select = ["E4","E7","E9","F"]`. Do not widen. `DTZ001/DTZ007` **rejected** for analysis code (DAM data carries no timezone); telemetry timestamps are the opposite case and are tz-aware UTC. |
 
-Full suite takes ~4 minutes (many tests spawn a real MCP server subprocess).
+Full suite ~4.5 min (many tests spawn a real MCP server subprocess).
 
 ```bash
 cd ~/projects/dam-agentic
 export DAM_MCP_STATE_DIR=/tmp/dam-scratch
-.venv/bin/python -m pytest -q          # 103 pass
+.venv/bin/python -m pytest -q          # 185 passed, 0 skipped, 185 collected
 .venv/bin/python -m ruff check .       # clean
 ```
 
----
+Without the analysis engine the same suite reports **175 passed / 10 skipped /
+185 collected** — the ten `requires_rtivity` tests. Report `passed / skipped /
+collected`, always; see `CLAUDE.md`.
 
-## What was completed in the last session
+### The contrast set is now a required, checked input
 
-Ten commits, `88098b9..9d7f561`. Three threads.
+The file declares an **experimental design**; statistics are optional.
 
-### 1. Unblocking the real-model path (HANDOFF-6 Phase 0.1/0.2/0.4)
+```yaml
+experiment: myexperiment-2026-07
+groups: [mut, ctrl]      # REQUIRED — the legal labels assign_groups is checked against
+# contrasts:             # OPTIONAL — omit if the statistics happen outside this tool
+```
 
-- `ec3dd6b` — `DEFAULT_GOOGLE_MODEL = "gemini-3.6-flash"`. `gemini-2.5-flash`
-  **404s** with "no longer available to new users" *even though `ListModels`
-  still lists it*. Catalog membership does not imply callability.
-- `2145577` — the `401 ACCESS_TOKEN_TYPE_UNSUPPORTED` was **not** an SDK bug. The
-  key lived only in `.env`, nothing loaded it, and the SDK fell through to
-  ambient credential resolution and sent a Bearer token. `load_env()` at both
-  entry points fixed it; `python-dotenv` is now declared (it had been arriving
-  transitively via `pydantic-settings`).
-- `78e963b` — `Trace.reasoning_tokens`. `gemini-3.6-flash` is a thinking model;
-  a 2-character answer cost 91 tokens, 85 of them thoughts. Verified against raw
-  `usageMetadata`: **LangChain folds thought tokens into `output_tokens`**, so
-  the existing `input+output` sum was already correct. `reasoning_tokens` is a
-  *subset* field for visibility — never add it to the total.
+That is complete and valid. It loads, `list_contrasts` returns `[]` (not an error),
+and the full load → window → group → compute pipeline runs. `contrasts:` is only
+needed if you want pre-registered comparisons executed *here*; where both are
+present, contrast labels must be a subset of `groups:`.
 
-### 2. Tool-contract hardening (unplanned, upstream of eval validity)
+The variable was `DAM_CONTRASTS_PATH` until this round. It is now
+**`DAM_PREREG_PATH`**, with no back-compat shim: because there is no default, a
+stale client config fails loudly and names the variable rather than silently
+loading the wrong declaration. The `list_contrasts` **tool** was deliberately not
+renamed — tool names are pinned by the eval layer — so its name is now misleading;
+see HANDOFF-9.
 
-- `b1b447b` — `load_experiment` returns `monitor_keys`; `assign_groups`
-  normalises a monitor key with `basename()`; the three accepted channel-spec
-  forms are stated in the tool description. **Why:** task prompts supply full
-  paths, `assign_groups` required basenames, nothing declared which — the model
-  was coin-flipping between two equally-supported readings.
-- `38de225` — `apply_exclusions` refuses an unresolvable key (same shape as the
-  `assign_groups` refusal) and reports `n_before`/`n_after`/`n_excluded`.
-  **Why:** an unresolved key was previously recorded as a successful exclusion
-  that excluded nobody — a wrong *n*, silently.
-- `dc6715d` — `set_analysis_window` reports `monitors_dropped`. **Why:** a window
-  could silently drop an entire monitor; the tally listed only survivors and
-  everything downstream ran on truncated data. `validate_dam.py` now tracks
-  window drops separately from genuinely unparseable files.
+`list_contrasts` returns `contrasts`, `groups`, `config_path` and `warnings`. An
+empty `contrasts` list is the normal case, so `groups` is what makes the reply
+useful.
 
-### 3. Closing Phase 0 under the revised criterion
+`config/contrasts.yaml` is a **template with placeholder labels and cannot load**
+(its `experiment:` value does not match its filename, by design). Real
+declarations live beside it as `config/contrasts-<experiment>.yaml`, one per
+experiment, each introduced by its own commit — that commit is the
+pre-registration timestamp and the only part of this gate a reviewer can check
+independently.
 
-- `e1fe252` — `evals/limits.py`. `RECURSION_LIMIT = MEASURED_STEP_FLOOR(10) × 3`.
-  The floor was *measured* by running the positive-control `ScriptedModel`
-  trajectory at successive limits (9 raises, 10 completes). LangGraph costs
-  `2n+2` super-steps for `n` tool calls, so the **previous literal `12` was
-  exactly the floor for the 5-call trajectory the first real run attempted** —
-  no margin for a single retry. The eval had been scoring our own leash as agent
-  behaviour.
-- `9cc4fcc` — task completion as a **fourth aggregate state**
-  (`n_task_completed`, `task_completion_rate`) alongside
-  attempted/completed/crashed. Deliberately **not** an eighth property: averaged
-  with the rails, a failed task would still read 6/7. Falsifiable via
-  `EvalTask.requires` (tools whose *success* is the deliverable) plus the
-  `STEP_LIMIT_SENTINEL`.
-- `fb11844` — `docs/phase0-eval-report.md`, the acceptance evidence, with
-  provenance.
-- `9d7f561` — `create_react_agent` → `langchain.agents.create_agent`
-  (`prompt=` → `system_prompt=`); `langchain>=1.0` declared.
+```bash
+DAM_PREREG_PATH=config/contrasts-myexp-2026-07.yaml python -m dam_mcp.server
+```
+
+With it unset the **server still starts and lists all 14 tools** — this is not a
+startup failure and must not be read as a broken MCP server. `load_experiment`,
+`describe_experiment`, `run_qc`, `window_tradeoff` and `set_analysis_window` work;
+`list_contrasts`, `run_contrast` and `assign_groups` refuse, naming the variable.
+`assign_groups` needs the file for its `groups:` key, not for any contrast.
+Operational detail and the Claude Code / Claude Desktop `env` block:
+`docs/running.md`.
 
 ---
 
-## Files touched (and what lives where)
+## Decisions in force (do not silently reverse)
 
-| File | Role |
-|---|---|
-| `dam_mcp/server.py` | 14 MCP tools + 4 resources. Tool docstrings are dispatch logic — treat them as API. |
-| `dam_mcp/schemas.py` | Typed returns. `MetricValue` admits no bare numeric list, so a raw series is a **validation error**, not something caught by eyeballing. |
-| `dam_mcp/engine.py` | The only place raw counts are touched. Wraps tested Rtivity functions; returns aggregates. |
-| `dam_mcp/defaults.py` | `DEFAULT_DEATH_HOURS = 12.0`. **Never hardcode a death-hours literal.** |
-| `skills/dam-qc/scripts/validate_dam.py` | The QC detector (subprocess, single source of truth for classification). |
-| `evals/limits.py` | `MEASURED_STEP_FLOOR`, `RECURSION_MULTIPLIER`, `RECURSION_LIMIT`. |
-| `evals/trace.py` | Trace model, `is_scorable`, `completed_task()`, `STEP_LIMIT_SENTINEL`. |
-| `evals/properties.py` | The seven rail properties + two heuristics. |
-| `evals/scoring.py` | Aggregation, crash accounting, report rendering. |
-| `evals/fake.py` | `ScriptedModel` / `RaisingModel` — keyless controls. |
-| `evals/run_agent_eval.py` | Layer 2 runner, `EvalAborted`, `AGENT_FAILURES` allowlist. |
-| `agent/graph.py` | `build_agent(model, provider, llm)`; provider switch; `load_env`; truststore. |
-| `tests/test_tool_contract.py` | Monitor-key + channel-spec contract over the real protocol. |
-| `tests/test_fake_agent.py` | Positive + negative controls; abort/crash paths; step-floor pinning. |
+### Carried forward from earlier rounds
 
----
-
-## Decisions worth knowing (do not silently reverse)
-
-1. **Infrastructure failures are not measurements.** A 429/401/TLS/timeout/any
+1. **Infrastructure failures are not measurements.** 429/401/TLS/timeout/any
    unrecognised exception raises `EvalAborted` and stops the eval. Only
    `AGENT_FAILURES = (GraphRecursionError, ToolException, OutputParserException)`
-   — **signed off by the human on 2026-07-24** — count as agent-behaviour
-   crashes. Do not widen this list to make a run complete.
-2. **Vacuous truth is not a pass.** A zero-tool-call trace is a crash, not a
-   score. Zero completed runs prints `NO DATA`, never a number.
-3. **Scorers are never loosened to make a run pass.** If a property fails on a
-   real trace, the failure is the finding.
-4. **`groups_before_metrics` counts *attempted* out-of-order calls, not
-   successful ones.** This is intentional. Scoring only successful violations
-   would measure how well the server defends itself, and a perfectly defensive
-   server would pin the property at 1.0 forever — a property that cannot fail.
-5. **Contrasts are pre-registered.** Never add a code path that lets the agent
-   write `config/contrasts.yaml`.
+   — signed off 2026-07-24 — count as agent-behaviour crashes. Do not widen it to
+   make a run complete.
+2. **Vacuous truth is not a pass.** A zero-tool-call trace is a crash. Zero
+   completed runs prints `NO DATA`, never a number.
+3. **Scorers are never loosened to make a run pass.** A property failing on a real
+   trace *is* the finding.
+4. **`groups_before_metrics` counts attempted, not successful, out-of-order calls.**
+   Scoring only successful violations would measure how well the server defends
+   itself, pinning the property at 1.0 forever.
+5. **Contrasts are pre-registered.** Never add a code path letting the agent write
+   a contrast file.
 6. **Window before exclusions.** `set_analysis_window` refuses once exclusions
-   exist. Preserve this in any refactor of the analysis path.
+   exist.
 7. **Flag, don't fix.** QC surfaces decisions; it never auto-excludes.
+8. **A refusal is a defensive success** (Phase 2). `outcome=refused` keeps the span
+   status OK with a `tool.refused` event. Marking it ERROR would make every guard
+   firing — the point of this server — look like a crash in the trace.
+
+### From this round (HANDOFF-9)
+
+9. **No default declaration file.** Unset `DAM_PREREG_PATH` refuses. Falling
+   back to the template would let an undeclared design run and look declared.
+   `_check_group_labels` does not swallow a `ToolError` either: with no default,
+   "unreadable" includes "nothing is declared", and swallowing that reopens the
+   hole.
+10. **The filename must contain the `experiment:` value.** A file named `-young`
+    declaring `-old` makes its own commit useless as a pre-registration record,
+    and the documented workflow is copy-and-edit — exactly how it happens.
+    `experiment:` is therefore required.
+11. **`phase` / `metric` / `test` are closed vocabularies, validated at load.**
+    The engine used to resolve any phase outside `(light, l, day)` to `Dark` via a
+    bare `else`, returning a clean-looking result for the wrong half of the day.
+    `engine._phase_label` refuses too, so a contrast dict arriving by another route
+    cannot fall through.
+12. **`run_id` is stamped server-side, never reconstructed caller-side.** Forced,
+    not preferred: `run_task`'s crash branch appends a `Trace` with no tool calls,
+    its abort branch raises before any `Trace` exists, and `load_experiment`'s
+    `session_id` is null by construction — so anything harvested from the agent's
+    output is empty for precisely the runs worth investigating.
+    `AuditRecord.run_id` defaults to the **constant**, never to `default_run_id()`,
+    so reverting the dispatch wiring is detectable.
+
+### Reversal since (recorded in HANDOFF-9)
+
+13. **`groups:` is authoritative; `contrasts:` is optional.** `groups:` declares
+    the legal labels and `assign_groups` is checked against it. A file with
+    `groups:` and no contrasts is complete and permits the whole pipeline;
+    `list_contrasts` returns `[]` rather than erroring. **What prompted it:** the
+    workflow has no in-tool statistics step — metrics are exported and tested in
+    Prism — so gating grouping on declared *tests* gated a path the work does not
+    travel. HANDOFF-9 said the check "can move but cannot become optional"; this
+    moved it and did not remove it. An undeclared label is still refused, one layer
+    earlier. Where both keys are present, contrast labels must be a **subset** of
+    `groups:` (the old union rule silently accepted a typo'd contrast label as a
+    new legal group). A file with contrasts and no `groups:` is **refused, not
+    derived** — deriving is the union rule again. Declaring a group and not
+    assigning it is now a warning rather than a refusal, so a partial load is not
+    blocked; that is the one thing genuinely relaxed, **and on the contrast-free
+    path the warning has no backstop behind it** — nothing downstream looks at
+    group membership again, so an ignored warning means a declared arm carries
+    n = 0 to the end. Accepted knowingly: a missing arm is visible in the exported
+    metrics. Do not weaken that warning or drop it from `assign_groups`'s return.
+
+### Standing verification rules — now in `CLAUDE.md`
+
+Four rules moved out of a handoff (read once) into `CLAUDE.md` (read every
+session), under **"Reporting verification"**: say what you actually ran before
+committing and flag it partial; report `passed / skipped / collected`, because
+uncollected modules are silent where skips are loud; say "parses and validates",
+never "works", for anything the engine arm cannot reach; and do not widen scope
+without asking. They came from a real failure — a commit that broke ten tests,
+pushed and reported clean. The account is in `HANDOFF-9`.
+
+---
 
 ## Dead ends and corrections (so they are not repeated)
 
-- **The `.env`/401 story.** Two sessions treated "SDK sends a Bearer token" as
-  the bug. It was an unloaded `.env`. Check credential *plumbing* before
-  suspecting a provider SDK.
+- **The `.env`/401 story.** Two sessions treated "SDK sends a Bearer token" as the
+  bug. It was an unloaded `.env`. Check credential *plumbing* before suspecting a
+  provider SDK.
 - **`ListModels` proves nothing.** `gemini-2.5-flash` was listed and uncallable.
 - **A green report is not a good result.** The first real run scored 1.000 on all
-  seven properties *while failing its task*. That is what produced the
-  fourth-state work and `HANDOFF-6-amendment-1`.
-- **Forensics that do not exist.** Two failures (an `assign_groups` error, and
-  the `grounded_n` failure in the closing eval) could not be diagnosed after the
-  fact because per-run traces are not persisted. Session JSONs survive but record
-  **end state only** and are named by whatever the agent chose (`exp_000`,
-  `Experiment 000`, …), so they cannot be attributed to a run or task. Do not
-  claim a cause from them — an earlier session did, and was wrong to.
+  seven properties *while failing its task*.
+- **The test suite was pinned to one lab's science.** Six test modules assigned the
+  contrast stub's group labels while `_check_contrast_labels` read the live file,
+  so writing a real pre-registration turned CI red. Fixed by
+  `DAM_PREREG_PATH` + an autouse fixture pinning the suite to
+  `tests/fixtures/contrasts-testfixture.yaml`. The live file now has exactly one
+  test, which asserts the template refuses to load and never what it declares.
+- **A pass count without a collection count hides tests.** `114 passed, 10 skipped`
+  looked healthy while thirteen tests were never collected — `langchain` was
+  absent, so whole modules vanished rather than skipping visibly.
+- **Skip reasons that guess send you to the wrong place.** `rtivity_available()`
+  was a bare `except Exception: return False`; "set `RTIVITY_PYTHON_PATH`" is
+  actively misleading when the real cause was a broken dependency.
+  `rtivity_status()` now returns `(importable, cause)`.
 - **The measured floor mattered.** Do not set `recursion_limit` by feel; a leash
   chosen by feel silently becomes part of the measurement.
 
@@ -173,25 +232,38 @@ Ten commits, `88098b9..9d7f561`. Three threads.
 
 ## What is left
 
-### Open GitHub issues
+### Open, and named honestly
 
-- **#1 — per-property not-applicable.** Properties return `True` vacuously when
-  their precondition never occurred. A comment on the issue proposes splitting
+- **W3C trace context across the stdio boundary.** `dam.agent.run` (eval process)
+  and `dam.tool.*` (server subprocess) still do **not** share a trace context. They
+  correlate by `dam.run_id` and `dam.session_id`, which a collector can join on —
+  `run_id` is the reliable one. True parent/child nesting needs `traceparent`
+  propagation through the MCP call, and no client/adapter exposes a hook for it.
+  The seam is left open, not built. The audit log has no such limit: it is written
+  server-side where the data is touched.
+- **`load_experiment`'s audit `session_id` is null.** That call mints the id, so
+  there is nothing to record at dispatch time. `run_id` makes the line attributable
+  to a run; it does not make it joinable to the session the call created.
+  Orthogonal, small, worth its own commit — a hook in `SessionStore.create` (the
+  single mint site) rather than in `server.load_experiment`.
+- **GitHub #1 — per-property not-applicable.** Properties return `True` vacuously
+  when their precondition never occurred. A comment proposes splitting
   `groups_before_metrics` into attempt-vs-effect. **Land both together and
-  re-baseline once**; do not move the property set piecemeal now that a baseline
-  exists.
-- **#2 — persist run traces (args + error text per tool call).** Now has two
-  motivating cases. **Recommend building this before HANDOFF-6 Phase 2**, not
-  inside it: Phase 2's audit record would subsume it, but Phase 2 is far off and
-  every eval run until then is unreconstructable.
+  re-baseline once**; do not move the property set piecemeal now a baseline exists.
+- **GitHub #2 — persist run traces.** Largely subsumed: the audit record carries
+  args, outcome, timestamp, files and error text per call, and `run_id` now closes
+  the attribution half. Re-read the issue against `docs/observability.md` before
+  building anything further.
 
 ### Blocked on the human (do not attempt)
 
-- **`config/contrasts.yaml` is still the `EXAMPLE_replace_me` stub.** Deciding
-  the real pre-registered comparisons is a scientific task. Per
-  `HANDOFF-6-amendment-1` §E, **Phase 3 should not open until this is real** —
-  `dam:contrasts:amend`, the scope the agent cannot hold, is meaningless while
-  the file it guards is a placeholder.
+- **A real `config/contrasts-<gene>-<timepoint>-<yyyy-mm>.yaml`.** Group labels,
+  the primary endpoint, and the multiplicity stance are scientific decisions. Until
+  one exists no contrast can run — which is now the intended behaviour, not a bug.
+  Per `HANDOFF-6-amendment-1` §E, **Phase 3 does not open until this is real**:
+  `dam:contrasts:amend`, the scope the agent cannot hold, is meaningless while the
+  file it guards is a template. #4 built the machinery the gate needs; it did not
+  open the phase.
 - **Monitor/treatment confound analysis** — needs the human's account of how
   treatments were assigned across monitors.
 
@@ -199,52 +271,17 @@ Ten commits, `88098b9..9d7f561`. Three threads.
 
 - `Rtivity-Python` version-string bump to `v0.12.0` (separate repo: edit, test,
   commit, push, re-tag, update the pin here).
-- `HANDOFF-6-amendment-1` D.2: a short analysis window (e.g. 30 min) succeeds
-  with a clean-looking tally despite being far below the 12 h death window and
-  48 h decline window. It manufactures well-formed numbers from a window that
-  cannot support the computation. Fix is a capability declaration in the result,
-  the same move as `monitor_keys`. Filed, not built.
-- Session naming: sessions should carry the eval task + run index rather than the
-  agent's improvised label, or traces cannot be attributed. (Noticed while
-  investigating #2; not filed yet.)
-
----
-
-## Exact next steps
-
-**HANDOFF-6 Phase 1 — private inference path (Ollama).** This is next and starts
-fresh. From `docs/HANDOFF-6-identity-security-deployment.md`:
-
-1. `build_agent(provider="ollama")` already exists and has **never been exercised
-   end-to-end**. Run the eval through it:
-   ```bash
-   export DAM_MCP_STATE_DIR=/tmp/dam-eval
-   .venv/bin/python -m evals.run_agent_eval --synthetic --runs 1 --provider ollama
-   ```
-   `langchain-ollama` is **not currently installed** and is not in the `agent`
-   extra — adding it is part of this phase.
-2. Pick a local model that can actually drive a tool-calling ReAct loop. If the
-   first choice cannot, **record which models were tried and why they failed** —
-   that negative result is part of the deliverable.
-3. Expect provider-shaped bugs (tool-call formatting, stop conditions). Fix them
-   **in the provider seam in `agent/graph.py`**, not by special-casing the eval.
-4. Write `docs/private-inference.md`: how to run the whole system with no
-   external network egress, which knobs matter, and what is lost (capability,
-   latency) versus a hosted model.
-5. Keep the SJ AI Foundry endpoint in mind as a fourth provider behind the same
-   seam. Do not build it — access is not granted — but do not close the seam.
-
-**Acceptance:** `--provider ollama` produces a scorable eval report with the
-network disabled, and `docs/private-inference.md` explains the tradeoff.
-
-**Working agreements:** TDD (write the failing test first — it has caught real
-defects repeatedly). Scoped commits, ~four per phase, each independently
-reviewable. Run `pytest -q` **and** `ruff check .` before declaring anything
-done, and report the actual counts. CI must stay green on 3.11/3.12/3.13;
-network-dependent work is keyless-tested or skipped, never left to fail
-intermittently.
+- `HANDOFF-6-amendment-1` D.2: a short analysis window (e.g. 30 min) succeeds with
+  a clean-looking tally despite being far below the 12 h death window and 48 h
+  decline window. It manufactures well-formed numbers from a window that cannot
+  support the computation. Fix is a capability declaration in the result, the same
+  move as `monitor_keys`. Filed, not built.
+- **HANDOFF-6 Phase 1 (Ollama)** — `build_agent(provider="ollama")` exists and has
+  never been exercised end-to-end. Needs an environment with model-registry egress;
+  the agent proxy in the cloud container 403s `ollama.com`, `registry.ollama.ai`
+  and `huggingface.co`. Plan and acceptance criteria: `HANDOFF-6` Phase 1.
 
 **Comparability note:** the Phase 0 baseline in `docs/phase0-eval-report.md` was
-measured on `gemini-3.6-flash` at `RECURSION_LIMIT=30`. If Phase 1 changes the
-property set, the limit, or the task set, the Ollama numbers are **not**
-comparable to it — say so explicitly rather than presenting them side by side.
+measured on `gemini-3.6-flash` at `RECURSION_LIMIT=30`. If a later round changes
+the property set, the limit, or the task set, its numbers are **not** comparable —
+say so rather than presenting them side by side.

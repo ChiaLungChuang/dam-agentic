@@ -289,12 +289,15 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
       * "1-16" / "1,3,5-8" — a spec string
     Channel numbers are 1-32. Anything else is refused rather than guessed at.
 
-    Refuses if the labels do not cover the groups the declared contrasts compare
-    (a legal contrast id must never point at a group that does not exist). Warns —
-    but does not refuse — if a group's channels all come from a single monitor,
-    because that confounds treatment with monitor. Returns the resulting group
-    sizes, any unassigned channels, and any such warnings. Overwrites any previous
-    assignment for the session.
+    Every label must appear in the experiment's declared `groups:` (see
+    list_contrasts for the file in effect); an undeclared label is refused rather
+    than accepted as a new group. Assigning only some of the declared groups is
+    allowed — a partial load is legitimate — but it is reported as a warning.
+
+    Warns, but does not refuse, if a group's channels all come from a single
+    monitor, because that confounds treatment with monitor. Returns the resulting
+    group sizes, any unassigned channels, and any such warnings. Overwrites any
+    previous assignment for the session.
     """
     session = _require(session_id)
     if not isinstance(mapping, dict) or not mapping:
@@ -345,7 +348,7 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
     for g in groups:
         sizes[g["labels"]] = sizes.get(g["labels"], 0) + 1
 
-    _check_contrast_labels(set(sizes))          # #9 — refuses on mismatch
+    _check_group_labels(set(sizes))             # refuses an undeclared label
 
     session.groups = groups
     STORE.save(session)
@@ -357,7 +360,9 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
         for ch in range(1, (m["n_channels"] or 32) + 1)
         if (m["file"], ch) not in assigned
     ]
-    warnings = [w for w in (_confound_warning(groups),) if w]   # #13 — warns only
+    warnings = [w for w in (_confound_warning(groups),
+                            _unassigned_declared_warning(set(sizes))) if w]
+    warnings += _declaration_warnings()          # e.g. ignored values under groups:
     return GroupResult(
         session_id=session_id, group_sizes=sizes, unassigned=unassigned,
         warnings=warnings,
@@ -480,21 +485,34 @@ def apply_exclusions(
 def list_contrasts(session_id: str) -> dict:
     """List the pre-declared contrasts the agent is allowed to run.
 
-    The set is declared before the data is seen, in config/contrasts.yaml or
-    wherever DAM_CONTRASTS_PATH points. The model may run any contrast here and
-    cannot invent one — this is pre-registration enforced by the tool boundary.
-    Returns each contrast's id, metric, phase, groups, test, and rationale, plus
-    `config_path`: which file this set came from. Report that path when reporting
-    results — one server may serve several experiments, each with its own
-    pre-registered set, and "which contrasts were live" is not otherwise
-    recoverable from the output. Choose one contrast and pass its id to
-    run_contrast.
+    The set is declared before the data is seen, in the file DAM_PREREG_PATH
+    points at. The model may run any contrast here and cannot invent one — this is
+    pre-registration enforced by the tool boundary.
+
+    **An empty list is a normal result, not an error.** A declaration file may
+    carry `groups:` and no contrasts at all; that is a complete declaration and
+    permits the whole load -> window -> group -> compute pipeline. When the list is
+    empty, compute the metrics and report them — do not substitute a comparison of
+    your own.
+
+    Returns:
+      * `contrasts` — id, metric, phase, groups, test and rationale for each;
+      * `groups`    — the legal group labels this experiment declares. These are
+        the labels assign_groups accepts, and the useful answer when `contrasts`
+        is empty: the experiment is still fully specified by its design;
+      * `config_path` — which file this came from. Report it with any result: one
+        server may serve several experiments, and which declaration was live is
+        not otherwise recoverable from the output;
+      * `warnings` — declaration problems worth a human's attention that are not
+        severe enough to refuse over.
     """
     _require(session_id)
     return {
         "session_id": session_id,
         "contrasts": config.list_contrasts(),
+        "groups": sorted(config.declared_groups()),
         "config_path": str(config.config_path()),
+        "warnings": config.declaration_warnings(),
     }
 
 
@@ -691,25 +709,60 @@ def _store_metric(session, name: str, summary: dict, decisions: list | None = No
     ).model_dump()
 
 
-def _check_contrast_labels(assigned: set[str]) -> None:
-    """#9: refuse if the declared contrasts reference groups this assignment does
-    not define.
+def _check_group_labels(assigned: set[str]) -> None:
+    """Refuse any label the experiment's `groups:` does not declare.
 
-    No longer best-effort. It used to swallow a ToolError so an unreadable config
-    never blocked assignment; with no default contrast set, 'unreadable' now
-    includes 'DAM_CONTRASTS_PATH is unset', which means no pre-registration is in
-    effect at all. Swallowing that would let groups be assigned outside any
-    declared set — the hole the no-default rule exists to close."""
-    required = config.contrast_group_labels()
-    missing = required - assigned
-    if missing:
+    This check used to run against the union of labels the declared *contrasts*
+    named, which meant grouping could not proceed without a declared test. That is
+    the wrong dependency for a workflow whose statistics happen outside this tool
+    (metrics exported, tested elsewhere), so the check moved onto `groups:` — the
+    experimental design — where it always belonged. It is a move, not a removal:
+    an undeclared label is still refused, one layer earlier, at the point the human
+    types it. HANDOFF-9 records the reversal.
+
+    Subset, not equality: assigning fewer groups than declared is legitimate (one
+    monitor of a four-arm design), so it warns rather than refuses. A contrast that
+    names an unassigned arm still fails loudly in run_contrast.
+
+    Not best-effort. It used to swallow a ToolError so an unreadable config never
+    blocked assignment; with no default declaration file, 'unreadable' now includes
+    'DAM_PREREG_PATH is unset', which means nothing is declared at all."""
+    declared = config.declared_groups()
+    undeclared = assigned - declared
+    if undeclared:
         raise ToolError(
-            f"The declared contrasts compare groups {sorted(required)}, but this "
-            f"assignment defines {sorted(assigned)} — {sorted(missing)} would have "
-            "no animals, so those contrasts could never run. Use the declared "
-            "labels, or update config/contrasts.yaml first (a human, "
-            "pre-registration step)."
+            f"{sorted(undeclared)} is not a declared group. This experiment "
+            f"declares {sorted(declared)}. Group labels come from the declaration "
+            "file's groups: key, not from the data — if that is a typo, fix the "
+            "mapping; if the group is real, a human adds it to groups: first."
         )
+
+
+def _declaration_warnings() -> list[str]:
+    """Best-effort: assign_groups has already validated against the declaration by
+    the time this runs, so a read failure here cannot change the outcome and must
+    not turn a successful assignment into an error."""
+    try:
+        return config.declaration_warnings()
+    except ToolError:
+        return []
+
+
+def _unassigned_declared_warning(assigned: set[str]) -> str | None:
+    """Flag, don't fix: a declared group with no animals is usually a partial load,
+    occasionally a mistake, and never something to decide on the caller's behalf."""
+    try:
+        declared = config.declared_groups()
+    except ToolError:
+        return None
+    missing = sorted(declared - assigned)
+    if not missing:
+        return None
+    return (
+        f"Declared group(s) {missing} were not assigned any channels. That is "
+        "legitimate for a partial load, but any contrast comparing them cannot "
+        "run, and any n reported for them is zero."
+    )
 
 
 def _confound_warning(groups: list[dict]) -> str | None:

@@ -14,7 +14,7 @@ delivered as **two pull requests**, and records one process failure worth keepin
 
 Two concerns, split into two PRs because they share no files. **PR A —
 pre-registration infrastructure**: the contrast set is now selected by
-`DAM_CONTRASTS_PATH` with *no default*, the filename must name the experiment the
+`DAM_PREREG_PATH` with *no default*, the filename must name the experiment the
 file declares, and `phase` / `metric` / `test` are closed vocabularies validated
 at load. **PR B — run attribution**: closes the gap HANDOFF-8 flagged, by stamping
 a `run_id` on every audit record and `dam.tool.*` span, handed to the server
@@ -48,21 +48,23 @@ Both halves are gone.
 
 | Commit | Contents |
 |---|---|
-| `Make the contrast set path configurable, and unpin the suite from it` | `config.config_path()` reads `DAM_CONTRASTS_PATH`, resolved per call. `list_contrasts` returns `config_path`. Autouse conftest fixture pins the suite to `tests/fixtures/contrasts-testfixture.yaml`. |
+| `Make the contrast set path configurable, and unpin the suite from it` | `config.config_path()` reads `DAM_PREREG_PATH`, resolved per call. `list_contrasts` returns `config_path`. Autouse conftest fixture pins the suite to `tests/fixtures/contrasts-testfixture.yaml`. |
 | `Mark config/contrasts.yaml as a template, not a pre-registration` | `TEMPLATE — NOT A PRE-REGISTRATION` header, `experiment: TEMPLATE_replace_me`, illustrative primary-endpoint rationale. |
-| `Require DAM_CONTRASTS_PATH; enforce filename and closed vocabularies` | No default; filename ↔ `experiment:`; `PHASES` / `METRICS` / `TESTS` validated at load; `engine._phase_label`; `docs/running.md`. |
+| `Require DAM_PREREG_PATH; enforce filename and closed vocabularies` | No default; filename ↔ `experiment:`; `PHASES` / `METRICS` / `TESTS` validated at load; `engine._phase_label`; `docs/running.md`. |
 
 ### Decisions worth knowing (do not silently reverse)
 
-1. **No default is the point, not an oversight.** Unset `DAM_CONTRASTS_PATH`
+1. **No default is the point, not an oversight.** Unset `DAM_PREREG_PATH`
    refuses. It breaks the stdio path loudly, once, at setup — the cheaper failure
    against "an unregistered comparison looked registered". `docs/running.md`
    carries the `claude mcp add --env` and `claude_desktop_config.json` fix, because
    a client launches the server itself and a shell `export` never reaches it.
-2. **`_check_contrast_labels` no longer swallows `ToolError`.** It was
-   best-effort, so an unreadable config never blocked assignment. With no default,
-   "unreadable" now includes "no pre-registration is in effect" — swallowing that
-   would reopen the hole the rule closes.
+2. **The label check no longer swallows `ToolError`.** It was best-effort, so an
+   unreadable config never blocked assignment. With no default, "unreadable" now
+   includes "nothing is declared" — swallowing that would reopen the hole the rule
+   closes. *(Since renamed `_check_contrast_labels` → `_check_group_labels` and
+   pointed at `groups:`; see the reversal below. This decision still stands — only
+   what it checks against changed.)*
 3. **The filename must contain `experiment:`.** The layout's whole value is that
    the commit introducing `config/contrasts-<experiment>.yaml` is that
    experiment's pre-registration timestamp. A file named `-young` declaring `-old`
@@ -79,7 +81,125 @@ Both halves are gone.
    only that the template refuses to load. A test that goes red because a
    scientist declared their actual experiment is testing the wrong thing.
 
+### ⚠ REVERSED — grouping no longer requires a declared contrast set
+
+**Superseded 2026-07-27, after PR #4 and #5 merged.** The section below is kept
+verbatim because its reasoning is still correct about *what the check is for*; it
+was wrong about *what the check should hang off*. Read it, then read this.
+
+**What changed.** `groups:` is now authoritative and required: it declares the
+legal group labels, and `assign_groups` is checked against it. `contrasts:` is
+optional. A file with `groups:` and no contrasts is a complete declaration that
+permits the whole load → window → group → compute pipeline. `list_contrasts`
+returns an empty list on such a file rather than erroring; `run_contrast` still
+refuses any id not declared.
+
+**What prompted it.** The investigator's actual analysis workflow has no in-tool
+statistics step: Rtivity produces metrics, they are exported, and all testing
+happens in Prism. So the contrast set was gating a path the work does not travel —
+grouping was blocked on declaring *tests* that would never be declared, for an
+experiment that is perfectly well specified without them. This project's value is
+the harness engineering, not the analysis; statistics are deprioritised
+accordingly.
+
+**This is a move, not a removal — the distinction the section below insisted on.**
+It said: *"the thing to preserve is the check, not the timing: it can move later,
+but it cannot become optional without reopening the config/session mismatch."*
+That constraint is honoured. An undeclared label is still refused, one layer
+earlier, at the point the human types it in `assign_groups`. What changed is what
+it is checked against.
+
+**The rule changed shape too, and got stricter in one direction.** The old rule was
+a *union*: every label the contrasts named had to be assigned, and any label a
+contrast named was thereby legal. That silently accepted a typo'd contrast label
+as a new legal group. The new rule is a *subset*, enforced twice:
+
+* contrast labels ⊆ `groups:`, checked **at load** — a contrast typo now surfaces
+  before any run, not as an empty arm much later;
+* assigned labels ⊆ `groups:`, checked **at assign time** — an assignment typo is
+  refused where it is made.
+
+**One thing genuinely relaxed, and the warning is unbacked on the default path.**
+Declaring a group and not assigning it used to be a refusal (via the union rule);
+it is now a **warning** on `assign_groups`. A partial load — one monitor of a
+four-arm design — is legitimate, and refusing it would block real work. Keeping
+the warning was decided deliberately.
+
+The justification first written here was wrong and is corrected: it claimed a
+contrast naming an unassigned arm "still fails loudly in `run_contrast`", implying
+a backstop behind the warning. **That backstop exists only for files that declare
+contrasts — precisely the case this change makes optional, and a contrast-free
+file is now the intended default path.** On that path nothing downstream ever
+looks at group membership again, so **the warning is the only signal there will
+ever be.** If a caller ignores it, a declared arm silently carries n = 0 through
+to the end.
+
+That was accepted knowingly, on this reasoning: a missing arm is visible
+downstream in the exported metrics — a group with no rows is not a subtle defect
+in a table someone is about to put into Prism. The warning is a convenience, not
+the last line of defence, and the last line of defence is the human reading their
+own export.
+
+Two consequences follow. Do not weaken the warning's text or drop it from
+`assign_groups`'s return; on the contrast-free path it is load-bearing in a way it
+would not be if a contrast existed. And if this trade proves wrong, tighten the
+warning to a refusal — do not restore the union rule.
+
+**Compatibility decision, made explicitly** (a file with `contrasts:` and no
+`groups:`): **refuse, do not derive.** Deriving `groups:` from the contrast labels
+*is* the union rule, so it would reintroduce exactly the defect the subset rule
+removes, and it would make a file's meaning depend on whether a key happened to be
+present — one loader with two silent semantics. The refusal names the labels the
+contrasts reference, so fixing it is a copy-paste. Blast radius in this repo is
+zero: both files carrying contrasts already declare `groups:`.
+
+**Ignored values under `groups:` are now loud.** A `groups:` mapping carries values
+(`mut: {Monitor1.txt: [1, 16]}`) that the loader never reads — channel ranges reach
+the server only through `assign_groups`. Ignoring them silently is the same shape
+as the phase fallback this repo already found: an input that looks like it does
+something and does not. Someone will write ranges there and assume they applied.
+`config.declaration_warnings()` now reports them, surfaced by both `list_contrasts`
+and `assign_groups`. A mapping whose entries carry *no* value warns about nothing —
+warning where there is no ignored input just trains the reader to skip warnings.
+
+The shared test fixture was converted from the mapping shape to a plain list, so
+the suite is not permanently carrying a warning it has to filter out. The mapping
+form keeps dedicated tests with their own files.
+
+**`list_contrasts` now returns `groups` and `warnings` as well as `contrasts` and
+`config_path`.** With contrasts optional, an empty `contrasts` list is the *normal*
+response, and a reply that says only "nothing" answers a question nobody asked. The
+useful answer is what the experiment *does* declare: its legal group labels. The
+docstring says so explicitly, so a model reading an empty list computes the metrics
+and reports them rather than inventing a comparison to fill the gap.
+
+**`DAM_CONTRASTS_PATH` was renamed to `DAM_PREREG_PATH`.** The old name described
+the file's old job. Now that the file's primary content is the design and contrasts
+are optional, it was actively misleading — it told the reader the file was about
+tests.
+
+No back-compatibility shim, deliberately. Normally renaming a published env var
+demands one, but the no-default rule makes the shim unnecessary: an unset variable
+already refuses loudly and names itself, so a stale client config *fails visibly*
+rather than silently loading the wrong declaration. A shim would convert that loud
+failure into a silent success on a deprecated path, which is the exact defect class
+this repo keeps removing.
+
+**The `list_contrasts` tool was NOT renamed, and the name is now misleading.** It
+returns a design declaration of which contrasts are one optional part. It was left
+alone because tool names are pinned by the eval layer in four places — the task
+prompts in `default_tasks`, `EvalTask.requires`, the tool-sequence properties in
+`evals/properties.py`, and the tool-surface smoke test — so renaming it is a
+separate change with its own blast radius and its own re-baselining question. It
+is a real wart; it is recorded rather than hidden, and it should be decided on its
+own.
+
+---
+
 ### Why grouping requires a declared contrast set
+
+*(Historical — see the reversal above. Retained for the reasoning, which explains
+what the check protects and why it could move but not vanish.)*
 
 The one refusal that looks like overreach, so it is worth writing down before
 someone "fixes" it.
@@ -121,7 +241,7 @@ config/
                                           # each its own commit = its timestamp
 ```
 
-Selected per run: `DAM_CONTRASTS_PATH=config/contrasts-<experiment>.yaml`.
+Selected per run: `DAM_PREREG_PATH=config/contrasts-<experiment>.yaml`.
 
 **No real contrast file is included in this PR.** Genotype labels and the choice
 of primary endpoint are a human, pre-registration decision; the investigator
@@ -269,4 +389,4 @@ it partial, report `passed / skipped / collected` because uncollected modules ar
 silent where skips are loud, say "parses and validates" rather than "works" for
 anything the engine arm cannot reach, and ask before widening scope — the one
 exception granted here was repair of self-inflicted breakage where the repair was
-the correct fix anyway (`DAM_CONTRASTS_PATH`).
+the correct fix anyway (`DAM_PREREG_PATH`).

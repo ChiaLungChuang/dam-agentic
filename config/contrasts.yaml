@@ -10,33 +10,50 @@
 #  config/contrasts-<experiment>.yaml, replace the labels and the experiment
 #  field with the real ones, and point the server at it:
 #
-#      DAM_CONTRASTS_PATH=config/contrasts-myexp.yaml python -m dam_mcp.server
+#      DAM_PREREG_PATH=config/contrasts-myexp.yaml python -m dam_mcp.server
 #
 #  Commit that file BEFORE the data is analysed — the commit is the
 #  pre-registration timestamp, and it is the only part of this gate that a
 #  reviewer can check independently.
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# Pre-declared contrast set.
+# This file declares an EXPERIMENTAL DESIGN. Contrasts are optional.
 #
-# The agent reads this file and may run any contrast in it. It cannot write to it
-# and cannot invent comparisons. This is pre-registration enforced by the tool
-# boundary rather than by discipline: an agent free to search metrics x groups x
-# phases for significance will find some, every time, and write fluently about it.
+#   groups:     REQUIRED. The legal group labels. assign_groups is checked
+#               against this and refuses any label not declared here.
+#   contrasts:  OPTIONAL. Pre-registered statistical comparisons. Omit the key
+#               entirely if your statistics happen outside this tool — a file
+#               with groups: and no contrasts: is complete and valid, and permits
+#               the whole load -> window -> group -> compute pipeline.
 #
-# Add contrasts here BEFORE looking at the data.
+# Where contrasts ARE declared, the agent may run any of them and cannot invent
+# one. That is pre-registration enforced by the tool boundary rather than by
+# discipline: an agent free to search metrics x groups x phases for significance
+# will find some, every time, and write fluently about it. Every label a contrast
+# names must already appear in groups: — a subset, never an addition, so a typo is
+# caught at load instead of quietly becoming a new legal group.
 #
-# The primary/secondary split below is likewise illustrative. In a real set,
-# PRIMARY ENDPOINT marks the one comparison the experiment was powered for.
-# No multiplicity correction is applied anywhere in this pipeline — run_contrast
-# returns a raw p-value per contrast and the server does not adjust across the
-# declared set.
+# Declare BEFORE looking at the data.
+#
+# The primary/secondary split below is illustrative. In a real set, PRIMARY
+# ENDPOINT marks the one comparison the experiment was powered for. No
+# multiplicity correction is applied anywhere in this pipeline — run_contrast
+# returns a raw p-value per contrast and the server does not adjust across the set.
+#
+# The env var that points at this file is DAM_PREREG_PATH (renamed from
+# DAM_CONTRASTS_PATH once the file's primary job became the design rather than
+# the tests). No back-compat shim: with no default, a stale config refuses loudly
+# instead of loading the wrong declaration. See docs/HANDOFF-9.
 
 experiment: TEMPLATE_replace_me   # e.g. geneA-geneswitch-young-2026-07
 
 # PLACEHOLDER group labels. These must appear verbatim as keys in the mapping
 # passed to assign_groups; channel ranges are supplied there by the human at call
 # time and are NOT read from this file.
+#
+# A mapping of label -> notes is also accepted, but only the KEYS are read and the
+# loader warns about any values you put under them. Do not write channel ranges
+# here expecting them to apply — they will not. Prefer this list form.
 groups:
   - geneA_EtOH
   - geneA_RU

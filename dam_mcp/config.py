@@ -34,7 +34,7 @@ TESTS = ("wilcoxon", "t")
 
 
 def config_path() -> Path:
-    """Which pre-registered set is in effect. DAM_CONTRASTS_PATH, and nothing else.
+    """Which pre-registered set is in effect. DAM_PREREG_PATH, and nothing else.
 
     There is deliberately **no default**. config/contrasts.yaml is a template with
     placeholder labels; falling back to it would mean an unregistered comparison
@@ -49,15 +49,15 @@ def config_path() -> Path:
     Read per call, never frozen at import: a captured path is indistinguishable
     from correct in a single-experiment process and wrong the moment a second set
     is used."""
-    env = os.environ.get("DAM_CONTRASTS_PATH")
+    env = os.environ.get("DAM_PREREG_PATH")
     if not env:
         raise ToolError(
-            "DAM_CONTRASTS_PATH is not set, so no pre-registered contrast set is "
+            "DAM_PREREG_PATH is not set, so no pre-registered contrast set is "
             "in effect and no contrast can be run. There is no default on purpose: "
             f"the file at {TEMPLATE_PATH} is a TEMPLATE with placeholder group "
             "labels, and loading it silently would let an unregistered comparison "
             "look pre-registered. Point the server at a real set, e.g. "
-            "DAM_CONTRASTS_PATH=config/contrasts-<experiment>.yaml — see "
+            "DAM_PREREG_PATH=config/contrasts-<experiment>.yaml — see "
             "docs/running.md. Every other tool works without it; only "
             "list_contrasts, run_contrast and assign_groups need it."
         )
@@ -73,8 +73,8 @@ def load_config(path: Path | None = None) -> dict:
             f"No contrast config at {path}. Contrasts must be declared before the "
             "data is seen — create that file with the pre-registered comparisons "
             "(see the example in the repo). If that is not the set you meant, "
-            "check DAM_CONTRASTS_PATH: it overrides the default location and is "
-            f"currently {os.environ.get('DAM_CONTRASTS_PATH') or 'unset'}."
+            "check DAM_PREREG_PATH: it overrides the default location and is "
+            f"currently {os.environ.get('DAM_PREREG_PATH') or 'unset'}."
         )
     try:
         import yaml
@@ -87,12 +87,14 @@ def load_config(path: Path | None = None) -> dict:
 
     data = yaml.safe_load(path.read_text()) or {}
     _check_experiment_matches_filename(data, path)
+    groups = _parse_groups(data, path)
 
     contrasts = data.get("contrasts") or []
     if not isinstance(contrasts, list):
         raise ToolError(
             f"{path} has a 'contrasts:' key that is not a list. It must be a list "
-            "of contrast declarations."
+            "of contrast declarations. To declare no contrasts, omit the key — a "
+            "file with groups: and no contrasts: is a complete declaration."
         )
     for i, c in enumerate(contrasts):
         if not isinstance(c, dict):
@@ -104,7 +106,71 @@ def load_config(path: Path | None = None) -> dict:
                 f"{sorted(missing)}. Each needs id, metric, phase, groups."
             )
         _check_vocabularies(c, path)
+        _check_contrast_groups_are_declared(c, groups, path)
     return data
+
+
+def _parse_groups(data: dict, path: Path) -> set[str]:
+    """The declared group labels — the authoritative list of what is legal.
+
+    Two shapes are accepted, both unambiguous about the labels themselves:
+
+      groups: [mut, ctrl]              a list of labels
+      groups:                          a mapping whose KEYS are the labels;
+        mut:  {Monitor1.txt: [1, 16]}  values are documentary and never read
+        ctrl: {Monitor1.txt: [17, 32]}
+
+    Channel ranges never come from this file — they reach the server through
+    assign_groups at call time (CLAUDE.md). A mapping is allowed only because both
+    forms already exist in this repo and both name the labels deterministically;
+    this is not a guess about intent."""
+    raw = data.get("groups")
+    if raw is None:
+        declared = sorted({g for c in (data.get("contrasts") or [])
+                           if isinstance(c, dict)
+                           for g in (c.get("groups") or [])})
+        hint = (f" The contrasts here reference {declared}; declare exactly the "
+                "labels you intend, then re-run.") if declared else ""
+        raise ToolError(
+            f"{path} has no 'groups:' key. It is required: groups: declares the "
+            "legal group labels and assign_groups is checked against it. This is "
+            "not derived from the contrasts on purpose — deriving it would let a "
+            "typo in a contrast label quietly become a legal group, which is the "
+            f"defect the check exists to catch.{hint}"
+        )
+    if isinstance(raw, dict):
+        labels = list(raw.keys())
+    elif isinstance(raw, list):
+        labels = list(raw)
+    else:
+        raise ToolError(
+            f"{path} has a 'groups:' key that is neither a list of labels nor a "
+            f"mapping of label -> notes; got {type(raw).__name__}."
+        )
+    clean = {str(g).strip() for g in labels if str(g).strip()}
+    if len(clean) != len(labels) or not clean:
+        raise ToolError(
+            f"{path} declares an empty or malformed groups: list ({labels!r}). "
+            "Every entry must be a non-empty label, and there must be at least one."
+        )
+    return clean
+
+
+def _check_contrast_groups_are_declared(c: dict, groups: set[str],
+                                        path: Path) -> None:
+    """Contrast labels must be a SUBSET of groups:, not a union with it.
+
+    The union rule this replaces accepted any label a contrast named, so a typo
+    silently became a new legal group and surfaced much later as an arm with no
+    animals. As a subset check it is caught here, at load, naming the typo."""
+    undeclared = sorted(set(c.get("groups") or []) - groups)
+    if undeclared:
+        raise ToolError(
+            f"Contrast '{c.get('id', '?')}' in {path} compares {undeclared}, which "
+            f"groups: does not declare. Declared: {sorted(groups)}. A contrast may "
+            "only compare groups the design declares — if that is a typo, fix the "
+            "contrast; if the group is real, add it to groups: first."
+        )
 
 
 def _check_experiment_matches_filename(data: dict, path: Path) -> None:
@@ -180,15 +246,38 @@ def list_contrasts(path: Path | None = None) -> list[dict]:
     return load_config(path).get("contrasts", [])
 
 
-def contrast_group_labels(path: Path | None = None) -> set[str]:
-    """Every group label referenced by a declared contrast. assign_groups checks
-    the human's labels against this so a legal contrast id can never point at a
-    group that does not exist in the session (the config/session mismatch bug)."""
-    labels: set[str] = set()
-    for c in list_contrasts(path):
-        for g in c.get("groups", []):
-            labels.add(g)
-    return labels
+def declaration_warnings(path: Path | None = None) -> list[str]:
+    """Things about the declaration file a reader should know but the loader will
+    not refuse over. Surfaced by list_contrasts and assign_groups.
+
+    Currently one: `groups:` written as a mapping carries values that are never
+    read. Ignoring them silently is the same shape as the phase fallback this repo
+    already found — an input that looks like it does something and does not.
+    Someone will write channel ranges there and assume they applied."""
+    data = load_config(path)
+    raw = data.get("groups")
+    if not isinstance(raw, dict):
+        return []
+    with_values = sorted(k for k, v in raw.items() if v not in (None, {}, [], ""))
+    if not with_values:
+        return []
+    return [
+        f"groups: entries {with_values} carry values under them. Those values are "
+        "NOT read — this file declares which group labels are legal, nothing more. "
+        "Channel ranges reach the server only through assign_groups, at call time. "
+        "If you expected the ranges written here to apply, they did not."
+    ]
+
+
+def declared_groups(path: Path | None = None) -> set[str]:
+    """The legal group labels this experiment declares.
+
+    assign_groups is checked against this. It used to be checked against the union
+    of labels the *contrasts* named — see HANDOFF-9 for why that moved: it gated
+    grouping on declared tests, and a workflow whose statistics happen outside this
+    tool never declares any. The check did not become optional; it moved onto the
+    thing it was always really about, the experimental design."""
+    return _parse_groups(load_config(path), path or config_path())
 
 
 def get_contrast(contrast_id: str, path: Path | None = None) -> dict:
@@ -196,6 +285,14 @@ def get_contrast(contrast_id: str, path: Path | None = None) -> dict:
         if c.get("id") == contrast_id:
             return c
     available = [c.get("id") for c in list_contrasts(path)]
+    if not available:
+        raise ToolError(
+            f"This experiment declares no contrasts, so '{contrast_id}' cannot be "
+            "run — nor can any other. The declaration file carries groups: only, "
+            "which is a complete and valid declaration: it permits the whole "
+            "load -> window -> group -> compute pipeline, and no statistical test. "
+            "Report the metrics; do not invent a comparison to fill the gap."
+        )
     raise ToolError(
         f"No declared contrast '{contrast_id}'. The pre-registered set is: "
         f"{available}. The model may only run a contrast that appears here; it "

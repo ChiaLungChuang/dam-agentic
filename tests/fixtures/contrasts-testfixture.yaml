@@ -1,6 +1,6 @@
 # TEST FIXTURE — not a real pre-registration.
 #
-# The suite pins itself to this file (via DAM_CONTRASTS_PATH, set by an autouse
+# The suite pins itself to this file (via DAM_PREREG_PATH, set by an autouse
 # fixture in conftest.py) so that whatever a lab declares in the real
 # config/contrasts.yaml cannot turn CI red. The live file is the scientist's
 # data, not the suite's fixture: a test that breaks when someone pre-registers
@@ -21,12 +21,13 @@
 
 experiment: testfixture
 
+# The recommended shape: a plain list of legal labels. (A mapping of
+# label -> notes is also accepted, but its values are never read and the loader
+# warns about them; the dedicated tests cover that form with their own files, so
+# this shared fixture stays warning-free.)
 groups:
-  # channel ranges per monitor -> group label. Humans assign this. Never the model.
-  CG8093_mut:
-    Monitor1.txt: [1, 16]
-  w1118_ctrl:
-    Monitor1.txt: [17, 32]
+  - CG8093_mut
+  - w1118_ctrl
 
 contrasts:
   - id: mut_vs_ctrl_sleep_night

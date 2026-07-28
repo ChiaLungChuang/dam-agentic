@@ -28,14 +28,14 @@ async def test_server_registers_expected_tools():
 
 @pytest.mark.asyncio
 async def test_server_starts_and_lists_tools_with_no_contrast_set(monkeypatch):
-    """DAM_CONTRASTS_PATH has no default and refuses when unset. That refusal must
+    """DAM_PREREG_PATH has no default and refuses when unset. That refusal must
     be per *tool call*, never at startup: an operator whose MCP client shows the
     server as failed reads it as a broken server, not as a missing
     pre-registration, and goes looking in the wrong place entirely.
 
     So the whole tool surface must still register with nothing configured. The
     three contrast-dependent tools refuse when called — see test_config.py."""
-    monkeypatch.delenv("DAM_CONTRASTS_PATH", raising=False)
+    monkeypatch.delenv("DAM_PREREG_PATH", raising=False)
     from dam_mcp import server
     tools = await server.mcp.list_tools()
     assert EXPECTED_TOOLS <= {t.name for t in tools}
