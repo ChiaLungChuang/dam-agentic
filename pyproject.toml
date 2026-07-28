@@ -57,17 +57,19 @@ telemetry = [
 # patch releases, so "ruff clean" is only meaningful against a stated version.
 agent = [
     "dam-agentic[telemetry]",         # the agent loop is instrumented too
+
     "langgraph>=1.0,<2", "langchain>=1.0,<2",
-    # 0.x by semver: the API may break at a MINOR bump, so `<1` is a much weaker
-    # guarantee than the caps above. Left at the major boundary as asked; if this
-    # is the next thing to break, `<0.4` is the tighter cap and it is a decision,
-    # not an oversight.
-    "langchain-mcp-adapters>=0.1,<1",
+    # 0.x by semver: the API may break at a MINOR bump, so `<1` would be a
+    # much weaker guarantee than the caps above. Tightened to `<0.4`
+    # deliberately; resolved version is 0.3.1, so this caps rather than
+    # downgrades.
+    "langchain-mcp-adapters>=0.1,<0.4",
     "langchain-anthropic>=0.3,<2",    # --provider anthropic
     "langchain-google-genai>=2.0,<5", # --provider google (Gemini)
     # NOT capped in this pass, deliberately: the five above were the named scope.
     # These carry the same exposure and are listed in HANDOFF-7 as a decision to
     # make, not an oversight to find later.
+
     "truststore>=0.9",                # TLS via the OS trust store, not certifi
     "python-dotenv>=1.0",             # load .env; was only arriving transitively
 ]
