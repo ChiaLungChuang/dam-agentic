@@ -1,0 +1,7 @@
+experiment: tau-geneswitch-young-2026-07
+
+groups:
+  - control_EtOH    # monitor 1, channels 1-32
+  - control_RU      # monitor 4, channels 1-32
+  - tau_EtOH        # monitor 7, channels 1-32
+  - tau_RU          # monitor 10, channels 1-32
