@@ -182,13 +182,23 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
 
 @mcp.tool(annotations=_READ_ONLY)
 def window_tradeoff(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
-    """Show how n-alive trades off against where the analysis window ends.
+    """Classify the inventory at several candidate window-ends.
 
-    Longer window means more flies have died by the cutoff, so fewer are alive to
-    analyse; a shorter window keeps more flies but sees less of each. This returns
-    that curve — candidate window-end, hours from start, and the alive/died/empty/
-    suspect counts at each — so the choice is informed rather than eyeballed. Use it
-    before set_analysis_window. Read-only; changes nothing.
+    Returns candidate end, hours from start, and the alive/died/empty/suspect
+    counts at each. Read-only; changes nothing.
+
+    **Read the rows carefully — this is not a survival curve.** Each row
+    re-classifies every channel independently over [start, end]; deaths are not
+    carried forward. So `n_died` means "would be classified dead if recording
+    stopped here", not "dead by this time", and every row sums to the same total.
+
+    Consequently `n_alive` is **not** monotonic in window length. On the first real
+    dataset it fell to 105 at 81 h and returned to 325 at 162 h, tracking whether
+    the candidate end fell in dark or in light: the default 12 h trailing-zero
+    threshold equals the dark phase of a 12:12 cycle, so a fly quiescent through
+    one night meets the death rule exactly. **The intermediate rows cannot be used
+    to choose a window.** The first and last rows are still meaningful. See
+    docs/HANDOFF-11.
     """
     session = _require(session_id)
     if death_hours <= 0:

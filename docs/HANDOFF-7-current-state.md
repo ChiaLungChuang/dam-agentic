@@ -254,6 +254,49 @@ pushed and reported clean. The account is in `HANDOFF-9`.
   args, outcome, timestamp, files and error text per call, and `run_id` now closes
   the attribution half. Re-read the issue against `docs/observability.md` before
   building anything further.
+
+#### From the first real run — all eight in `docs/HANDOFF-11-first-real-run.md`
+
+Session `dam-7010fc5ebdc9`: 12 monitors, 384 channels, 161.8 h. None of these were
+reachable by the synthetic corpus — each needs a real light-dark cycle, real
+mortality, or real per-monitor clocks.
+
+- **H11-1 — `window_tradeoff` is non-monotonic and its rows are not cumulative.**
+  Each row re-classifies all 384 channels independently, so every row sums to 384
+  and `n_died` means "would be called dead if recording stopped here". The
+  intermediate rows cannot be used to pick a window. *The note and two docstrings
+  were corrected; the computation was not.* **Two tests still assert the
+  monotonicity the real data falsifies** (`test_window_tradeoff_curve_is_non_increasing`,
+  and a `rows[0] >= rows[-1]` assertion in `test_contract.py`) — whoever fixes the
+  computation resolves both in that commit.
+- **H11-2 — the death rule cannot distinguish sleep from death.** `death_hours`
+  defaults to 12.0 and the cycle is 12:12, so the trailing-zero threshold equals
+  the dark phase and a fly quiescent through one night meets the death rule
+  exactly. Upstream of H11-1. **Fix this one first.**
+- **H11-3 — `compute_*` runs silently with QC decisions outstanding.** 63 raised,
+  none applied, sleep computed over all 384 channels without a word; flags lopsided
+  by group (26/10/18/9), so a group difference can be a difference in how many
+  animals were dying. A warning is proposed, not built.
+- **H11-4 — latency is reported without its denominator.** Defined for 52/71/21/18
+  of 96 per group; the largest effect in the dataset sits on the smallest n, and
+  the return says nothing about it. The agent caught this; the tool did not.
+- **H11-5 — an empty tube was excluded as mortality.** M9 ch16's last movement is
+  six minutes after the run started. Excluding it is right; counting it as a death
+  event is not, and any survival analysis on these exclusions would.
+- **H11-6 — the exclusion reason says "through full run"** and is literally true of
+  one channel of thirteen. Correct the wording *before* any report is rendered —
+  `render_report` copies reasons into the manifest verbatim.
+- **H11-7 (open question) — channel indices repeat across monitors to the minute.**
+  Files confirmed raw. Either a one-minute clock offset between monitors, or
+  something shared at the same channel index — which would make channel index a
+  confounder in a design that assigns groups by channel range. Needs a second
+  experiment, not a code change.
+- **H11-8 (open question) — total sleep units are unverified.** 4–5 h over 6.7 days
+  is too low, and light-phase bout duration × bout count is ~8,919 min against
+  ~4,854 min of light phase available — arithmetically impossible over one
+  interval. Either the two are computed over different intervals, or dying flies'
+  trailing bouts inflate the mean (SD > mean points at the second, which ties to
+  H11-3). **Settle before any sleep number leaves this system.**
 - **The mcp 2.x migration.** `mcp` is capped at `<2` because 2.0.0 removed
   `mcp.server.fastmcp` outright — no `FastMCP` symbol anywhere in the package, no
   top-level `fastmcp` module; `mcp.server` now exposes `mcpserver`, `lowlevel`,
