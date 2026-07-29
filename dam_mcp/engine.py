@@ -186,12 +186,23 @@ def run_validate(paths: list[str], death_hours: float, out_path: Path,
 
 def window_tradeoff(paths: list[str], death_hours: float = DEFAULT_DEATH_HOURS,
                     n_points: int = 6) -> dict:
-    """n-alive as a function of where the analysis window ends.
+    """Classification of the inventory at several candidate window-ends.
 
-    Longer window -> more flies have died by the cutoff -> fewer alive. The point is
-    to turn an eyeball decision into an informed one: compute the curve, let the
-    human pick. Reuses the tested classifier in-process (one parse, many cutoffs)
-    rather than shelling out per candidate.
+    Reuses the tested classifier in-process (one parse, many cutoffs) rather than
+    shelling out per candidate.
+
+    **Each cutoff is an independent re-classification over [start, end], not a
+    cumulative one.** Deaths are not carried forward, so a channel counted dead at
+    an early cutoff can be counted alive at a later one, and every row sums to the
+    same channel total. `n_alive` is therefore not monotonic in the window length,
+    and on real data it is visibly not: the curve tracks whether the candidate end
+    lands in dark or in light, because the default trailing-zero threshold (12 h)
+    equals the dark phase of a 12:12 cycle.
+
+    The docstring here used to say "longer window -> more flies have died -> fewer
+    alive". That described a cumulative survival curve, which is not what this
+    computes. The wording is corrected; the computation is unchanged and the
+    mismatch between the two is recorded in docs/HANDOFF-11.
     """
     vd = _validate_module()
     monitors = [m for m in (vd.parse_monitor(p) for p in paths) if m]

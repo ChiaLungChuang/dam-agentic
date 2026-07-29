@@ -165,7 +165,13 @@ async def test_window_tradeoff_returns_a_curve(tmp_path, monitor_files):
         assert len(rows) >= 2
         for row in rows:
             assert {"end", "hours_from_start", "n_alive", "n_died"} <= set(row)
-        # extending the window cannot leave more flies alive than a shorter one
+        # HANDOFF-7 item H11-2 — known: this holds only because the synthetic
+        # corpus produces a monotone tradeoff curve. Real data falsifies it —
+        # n_alive is not monotonic in window length (the curve dips and recovers
+        # with the light-dark phase of the candidate end), so this asserts a
+        # property of the fixture, not of window_tradeoff. The tool's own note
+        # says n_alive is NOT monotonic; that is the accurate statement.
+        # See docs/HANDOFF-11-first-real-run.md.
         assert rows[0]["n_alive"] >= rows[-1]["n_alive"]
         assert not _has_numeric_array(r.data)      # counts are labelled, not a series
 

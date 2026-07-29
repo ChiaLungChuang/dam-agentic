@@ -136,8 +136,16 @@ class TradeoffResult(BaseModel):
     common_start: str
     rows: list[TradeoffRow]
     note: str = (
-        "n_alive falls as the window extends and more flies have died by the "
-        "cutoff. Pick the window before applying exclusions."
+        "Each row RE-CLASSIFIES the whole inventory independently over "
+        "[start, end]. It does not carry deaths forward, so n_died means 'would "
+        "be called dead if recording stopped here', NOT 'dead by this time', and "
+        "every row sums to the same channel total. n_alive is therefore NOT "
+        "monotonic in the window length — on real data it falls and rises again, "
+        "tracking whether the candidate end lands in dark or in light, because "
+        "the trailing-zero threshold and the dark phase are the same length. "
+        "Use the first and last rows; the intermediate rows cannot be used to "
+        "choose a window. See docs/HANDOFF-11. Pick the window before applying "
+        "exclusions."
     )
 
 
