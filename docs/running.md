@@ -8,13 +8,13 @@ design rationale is in [`mcp-spec.md`](mcp-spec.md) and `CLAUDE.md`.
 
 | Layer | Location | State |
 |---|---|---|
-| MCP server — 12 tools, 4 resources | `dam_mcp/` | Implemented, tested |
+| MCP server — 14 tools, 4 resources | `dam_mcp/` | Implemented, tested |
 | Session state + disk persistence | `dam_mcp/sessions.py` | Implemented, tested |
 | Compute layer over Rtivity-Python | `dam_mcp/engine.py` | Implemented, tested |
 | Typed returns | `dam_mcp/schemas.py` | Implemented, tested |
 | Pre-declared contrasts (read-only) | `dam_mcp/config.py` | Implemented |
 | Report renderer | `dam_mcp/report.py` | Implemented, tested |
-| LangGraph agent (Phase 2) | `agent/` | Implemented, not yet run |
+| LangGraph agent (Phase 2) | `agent/` | Implemented; run against a live model — see [`phase0-eval-report.md`](phase0-eval-report.md) |
 
 The tools return **summaries and a `session_id` handle** — never activity counts.
 The compute layer is the only code that touches raw data, and it hands back
@@ -214,8 +214,18 @@ repo root. If the server connects but every contrast tool refuses, the `env`
 block is missing or the path is relative — the refusal message names the variable
 and the path it looked at.
 
-Two other variables belong in the same `env` block when you need them:
-`DAM_MCP_STATE_DIR` (session state) and `DAM_MCP_AUDIT_LOG` (the audit stream).
+### Environment variables
+
+All of these belong in the same `env` block, because the client launches the server
+and an `export` in your shell does not reach it.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DAM_PREREG_PATH` | **none — refuses** | The pre-registration declaration. No default, deliberately. |
+| `DAM_MCP_STATE_DIR` | `~/.dam_mcp/sessions` | Where session state is persisted. |
+| `DAM_REPORT_DIR` | `<state_dir>/reports` | The only directory `render_report` may write to. Containment is checked after `resolve()`, so `..` and symlinks cannot walk out; a `path` outside it is refused. |
+| `DAM_MCP_AUDIT_LOG` | off | Path for the JSONL audit stream (stdlib-only, independent of OpenTelemetry). |
+| `DAM_RUN_ID` | `unattributed` | Stamped onto every span and audit record server-side, so a result is traceable to the run that produced it. The eval runner mints one per run. |
 
 ## Run the agent (Phase 2)
 
