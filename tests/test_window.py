@@ -88,6 +88,13 @@ def test_window_tradeoff_curve_is_non_increasing(monitor_files):
     rows = res["rows"]
     assert len(rows) == 6
     alive = [r["n_alive"] for r in rows]
-    assert alive == sorted(alive, reverse=True)     # more deaths accrue as it extends
+    # HANDOFF-7 item H11-1 — known: this monotonicity holds only for the synthetic
+    # corpus, which produces a monotone curve. Real data falsifies it: n_alive falls
+    # and rises again as the candidate end lands in dark or in light, because the
+    # trailing-zero threshold and the dark phase are the same length. The assertion
+    # is kept as a characterisation of the fixture, not as a property of
+    # window_tradeoff. See docs/HANDOFF-11-first-real-run.md.
+    assert alive == sorted(alive, reverse=True)
+    # Same caveat as above (H11-1) — first-vs-last only, still fixture-dependent.
     assert rows[0]["n_alive"] >= rows[-1]["n_alive"]
     assert all(r["n_died"] >= 0 and r["n_empty"] >= 0 for r in rows)
