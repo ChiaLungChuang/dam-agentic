@@ -8,13 +8,15 @@ design rationale is in [`mcp-spec.md`](mcp-spec.md) and `CLAUDE.md`.
 
 | Layer | Location | State |
 |---|---|---|
-| MCP server — 12 tools, 4 resources | `dam_mcp/` | Implemented, tested |
+| MCP server — 14 tools, 4 resources | `dam_mcp/` | Implemented, tested |
 | Session state + disk persistence | `dam_mcp/sessions.py` | Implemented, tested |
 | Compute layer over Rtivity-Python | `dam_mcp/engine.py` | Implemented, tested |
 | Typed returns | `dam_mcp/schemas.py` | Implemented, tested |
 | Pre-declared contrasts (read-only) | `dam_mcp/config.py` | Implemented |
 | Report renderer | `dam_mcp/report.py` | Implemented, tested |
-| LangGraph agent (Phase 2) | `agent/` | Implemented, not yet run |
+| Observability — spans + audit, `run_id` stamped | `dam_mcp/observability.py`, `audit.py` | Implemented, tested |
+| LangGraph agent | `agent/` | Implemented; run end-to-end against a live LLM (`phase0-eval-report.md`) |
+| Layer 2 eval + red team | `evals/` | Implemented, tested |
 
 The tools return **summaries and a `session_id` handle** — never activity counts.
 The compute layer is the only code that touches raw data, and it hands back
@@ -42,6 +44,31 @@ install it — no path env var stands in for packaging.
 
 Session state is written under `~/.dam_mcp/sessions` by default; override with
 `DAM_MCP_STATE_DIR`.
+
+### Where reports are written — `DAM_REPORT_DIR`
+
+`render_report` writes **only** inside the report root: `DAM_REPORT_DIR` if set,
+otherwise `<state_dir>/reports`. A relative `path` is placed inside that root, so
+`render_report(path="qc-report.md")` is the ordinary call. An absolute path is
+accepted only if it already resolves inside the root; anything else is refused,
+including the pre-registered declaration, which the server never writes.
+
+Containment is checked *after* `resolve()`, so `..` traversal and symlinked
+escapes are caught rather than passing a string-prefix test.
+
+This is a boundary, not a default to work around. `render_report` previously
+accepted any path, which made it an arbitrary file write at the server process's
+permissions — it could overwrite the declaration, the audit log, or session state.
+That was found by the red-team suite and closed; see
+[`HANDOFF-10-redteam-findings.md`](HANDOFF-10-redteam-findings.md).
+
+| Variable | Effect | Default |
+|---|---|---|
+| `DAM_PREREG_PATH` | the declaration in effect — **required, no default** | — |
+| `DAM_MCP_STATE_DIR` | session state | `~/.dam_mcp/sessions` |
+| `DAM_REPORT_DIR` | the only directory `render_report` may write into | `<state_dir>/reports` |
+| `DAM_MCP_AUDIT_LOG` | audit JSONL path | `<state_dir>/audit.jsonl` |
+| `DAM_RUN_ID` | run label stamped on every audit record and span | `unattributed` |
 
 ## Declare your contrasts first — `DAM_PREREG_PATH` is required
 
