@@ -4,8 +4,9 @@ Agentic QC and analysis over TriKinetics Drosophila Activity Monitor (DAM) data.
 LLM orchestrates tested analysis functions; it never computes a result and never sees
 raw data — every tool returns a summary plus a `session_id` handle, and the counts stay
 server-side in Python. Fewer than a few hundred numbers cross back per compute call,
-against 384 channels × 9,708 one-minute reads across twelve files — roughly 3.7 million
-activity samples — in the one real experiment this has been run on.
+against the 384 channels over 161.8 h of the one real experiment this has been run on.
+The total sample count behind that is not stated here because no artifact in this repo
+records the per-monitor read count or bin width, and the raw files are not committed.
 
 ## The finding that motivated the design
 
@@ -135,6 +136,12 @@ cycle, real mortality, or real per-monitor clocks. Recorded in
   conditions under which that equivalence fails: a declaration from a shared drive
   or a repo the lab does not own, a multi-tenant server setting `DAM_PREREG_PATH`
   per request, and HTTP transport letting a caller supply or select a declaration.
+- **The server does not enumerate in MCP Inspector v2.0.0.** The connection
+  succeeds and Inspector reports **Connected**, but `tools/list`, `prompts/list` and
+  `resources/list` stay pending, the Tools tab renders empty, and the server console
+  shows no traceback. This is unresolved. The server starts and serves correctly over
+  stdio to other clients — Claude Code, the scripted client in `evals/harness.py`,
+  and a live LLM all enumerate all 14 tools and drive a full analysis.
 - **Agent-loop and tool spans do not share a W3C trace context.** `dam.agent.run`
   runs in the eval process and `dam.tool.*` in the server subprocess; they correlate
   by `dam.session_id`, which a collector can join on. True cross-process nesting
@@ -169,11 +176,24 @@ YAML
 DAM_PREREG_PATH=$PWD/config/contrasts-myexp-2026-07.yaml python -m dam_mcp.server
 ```
 
-That is a complete, valid declaration: `list_contrasts` returns
-`{"contrasts": [], "groups": ["ctrl", "mut"], "config_path": "...", "warnings": []}`
-and the load → window → group → compute pipeline runs. Use an absolute path — a
-client launches the server itself, so its working directory is not necessarily the
-repo root.
+Use an absolute path — a client launches the server itself, so its working directory
+is not necessarily the repo root.
+
+That is a complete, valid declaration. To see it, call `load_experiment` first:
+every tool including `list_contrasts` takes a `session_id`, so calling it on a bare
+server returns `No session ...` rather than the declaration.
+
+```
+load_experiment(paths=[".../Monitor1.txt", ".../Monitor2.txt"], name="qs")
+    → {"session_id": "dam-743d9b4aea98", ...}
+
+list_contrasts(session_id="dam-743d9b4aea98")
+    → {"session_id": "dam-743d9b4aea98", "contrasts": [], "groups": ["ctrl", "mut"],
+       "config_path": ".../contrasts-myexp-2026-07.yaml", "warnings": []}
+```
+
+An empty `contrasts` list is the normal answer for a groups-only declaration, and
+the load → window → group → compute pipeline runs from there.
 
 ```bash
 pytest                                                    # the suite
