@@ -4,9 +4,8 @@ Agentic QC and analysis over TriKinetics Drosophila Activity Monitor (DAM) data.
 LLM orchestrates tested analysis functions; it never computes a result and never sees
 raw data — every tool returns a summary plus a `session_id` handle, and the counts stay
 server-side in Python. Fewer than a few hundred numbers cross back per compute call,
-against the 384 channels over 161.8 h of the one real experiment this has been run on.
-The total sample count behind that is not stated here because no artifact in this repo
-records the per-monitor read count or bin width, and the raw files are not committed.
+against roughly 3.7 million activity samples — 384 channels × 9,708 reads — in the one
+real experiment this has been run on (`docs/HANDOFF-11-first-real-run.md`).
 
 ## The finding that motivated the design
 

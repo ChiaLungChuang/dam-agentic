@@ -37,10 +37,15 @@ supplies the context.
 | Declaration | `config/tau-geneswitch-young-2026-07.yaml` |
 | Monitors | 12 raw TriKinetics files, confirmed raw downloads |
 | Channels | 384 (12 × 32) |
+| Reads per channel | 9,708 |
+| Bin width | 60 s |
 | Span | 161.8 h ≈ 6.74 days |
 | Groups | 4 × 96 channels |
 | QC | 63 `decisions_required`, flags by group 26 / 10 / 18 / 9 |
 | Exclusions | 13, all under a death reason |
+
+Reads per channel and bin width were measured directly from the twelve raw monitor
+files on the source machine; those files are not committed to this repo.
 
 ---
 
