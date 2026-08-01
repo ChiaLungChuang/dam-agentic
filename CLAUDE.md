@@ -78,6 +78,11 @@ Standard DAM2 monitor files are **42 tab-delimited columns**, no header:
 | 10 | Light status (`0`/`1`) |
 | 11–42 | Channels 1–32, beam-break counts |
 
+42 is the **tab-delimited** count. `awk` without `-F'\t'` splits on any whitespace and
+reports **44**, because the date column (`22 Dec 25`) holds two internal spaces and
+becomes three fields — this has now been raised twice as a format discrepancy and is
+not one; use `awk -F'\t'`.
+
 Bin width is typically 1 min — **derive it from consecutive timestamps, never assume**.
 A 5-min run parsed as 1-min data yields sleep metrics wrong by 5× that look plausible.
 
