@@ -54,6 +54,23 @@ experiment: TEMPLATE_replace_me   # e.g. geneA-geneswitch-young-2026-07
 # A mapping of label -> notes is also accepted, but only the KEYS are read and the
 # loader warns about any values you put under them. Do not write channel ranges
 # here expecting them to apply — they will not. Prefer this list form.
+#
+# ONE EXCEPTION, and it is read: an INTEGER under a label is the declared number
+# of independent ANIMALS in that group, and assign_groups refuses a mapping that
+# assigns a different number of channels — naming the group, the declared n and
+# the computed n. Override it with n_override_reason plus confirm_n_override=true
+# when a tube was genuinely not loaded. The list form declares no n and is not
+# checked, which is what every declaration written before this looked like.
+#
+#     groups:              # the declared-n form; channels are still supplied
+#       geneA_EtOH: 32     # by the human in assign_groups, never from here
+#       geneA_RU:   32
+#
+# Worth declaring when channels and animals can differ. On a rig where several
+# monitor files are several detector beams on ONE set of tubes, a mapping that
+# assigns every file's channels to a group reports a multiple of the real n and
+# nothing else in the system objects — see docs/HANDOFF-12-monitor-topology.md.
+# This is a checksum on that number, not a model of the apparatus.
 groups:
   - geneA_EtOH
   - geneA_RU

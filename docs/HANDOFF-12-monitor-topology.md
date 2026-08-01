@@ -149,7 +149,11 @@ each downstream item depends on which representation is chosen.
 ## Exact next steps
 
 * **Do not run a contrast on session `dam-7010fc5ebdc9`.** Its n is 3× the animal
-  count and the contrast machinery has no way to know.
+  count and the contrast machinery has no way to know. The guard here is
+  structural rather than procedural: that experiment's declaration carries
+  `groups:` and no `contrasts:`, so `run_contrast` has nothing to select and
+  refuses whatever id it is given — this line records why, it is not what enforces
+  it.
 * **Decide the representation before writing code.** The open question is where the
   apparatus↔beam relationship is declared: in `load_experiment`'s arguments, in the
   pre-registration file, or in a new tool. It is a pre-registration-shaped fact — it

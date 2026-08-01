@@ -402,3 +402,84 @@ def test_assigning_a_subset_of_declared_groups_is_allowed(tmp_path, monkeypatch)
                            groups=("a", "b", "c", "d"))
     monkeypatch.setenv("DAM_PREREG_PATH", str(p))
     server._check_group_labels({"a", "b"})                  # no raise
+
+
+# ── declared n: an integer under a group label is a checksum, not a note ──────
+#
+# HANDOFF-12 is the reason this exists: three monitor files were three beams on
+# one population, so a mapping assigned 96 channels to a group of 32 animals and
+# every layer accepted it. The declaration already stated the design; nothing
+# compared the two. These tests cover the *reading* of the declared n; the
+# comparison itself is in test_tools.py.
+
+def test_an_integer_under_a_group_label_is_the_declared_n(tmp_path, monkeypatch):
+    p = tmp_path / "contrasts-ndecl.yaml"
+    p.write_text("experiment: ndecl\ngroups:\n  mut: 32\n  ctrl: 32\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    assert config.declared_n() == {"mut": 32, "ctrl": 32}
+    assert config.declared_groups() == {"mut", "ctrl"}      # labels still read
+
+
+def test_an_integer_declared_n_is_not_warned_about(tmp_path, monkeypatch):
+    """The mapping-values warning says those values are NOT read. An integer now
+    is read, so warning about it would be false — and would train a reader to
+    ignore the warning in the case where it is still true."""
+    p = tmp_path / "contrasts-ndecl.yaml"
+    p.write_text("experiment: ndecl\ngroups:\n  mut: 32\n  ctrl: 32\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    assert config.declaration_warnings() == []
+
+
+def test_the_list_form_declares_no_n_and_warns_nothing(tmp_path, monkeypatch):
+    """The existing convention, unchanged. No n declared is not a defect: it is
+    what every declaration written before this check looked like."""
+    p = _write_groups_only(tmp_path / "contrasts-list2.yaml", experiment="list2")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    assert config.declared_n() == {}
+    assert config.declaration_warnings() == []
+
+
+def test_a_non_integer_value_declares_no_n_and_keeps_its_warning(tmp_path,
+                                                                 monkeypatch):
+    p = tmp_path / "contrasts-mixed.yaml"
+    p.write_text("experiment: mixed\ngroups:\n"
+                 "  mut: 16\n"
+                 "  ctrl:\n    Monitor1.txt: [17, 32]\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    assert config.declared_n() == {"mut": 16}               # ctrl declares none
+    (warn,) = config.declaration_warnings()
+    assert "ctrl" in warn and "mut" not in warn             # only the ignored one
+    assert "NOT read" in warn
+
+
+def test_a_boolean_is_not_a_declared_n(tmp_path, monkeypatch):
+    """bool is an int in Python. `mut: true` is not a count, and reading it as 1
+    would silently make every real group mismatch."""
+    p = tmp_path / "contrasts-bool.yaml"
+    p.write_text("experiment: bool\ngroups:\n  mut: true\n  ctrl: 16\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    assert config.declared_n() == {"ctrl": 16}
+    (warn,) = config.declaration_warnings()
+    assert "mut" in warn
+
+
+def test_a_non_positive_declared_n_is_refused_at_load(tmp_path, monkeypatch):
+    """Refused where it is wrong. Carried through, a 0 would compare against a
+    real assignment, always mismatch, and surface as an assign_groups refusal
+    naming the mapping — which is the one place that is not the problem."""
+    p = tmp_path / "contrasts-zero.yaml"
+    p.write_text("experiment: zero\ngroups:\n  mut: 0\n  ctrl: 16\n")
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    with pytest.raises(ToolError) as exc:
+        config.declared_n()
+    assert "must be positive" in str(exc.value)
+
+
+def test_the_declared_n_fixture_parses_and_declares_both_arms(monkeypatch):
+    """The corpus case itself: a declaration whose declared n disagrees with what
+    the shared synthetic corpus can assign. Nothing in tests/fixtures could
+    express that before, because every other declaration uses the list form."""
+    from pathlib import Path
+    p = Path(__file__).resolve().parent / "fixtures" / "contrasts-nmismatch.yaml"
+    monkeypatch.setenv("DAM_PREREG_PATH", str(p))
+    assert config.declared_n() == {"nmut": 16, "nctrl": 99}
