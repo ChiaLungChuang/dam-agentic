@@ -106,7 +106,7 @@ and the design is confounded. These are defects in the tooling, found by using i
   flags are lopsided by group (26 / 10 / 18 / 9), so a group difference in sleep can
   be a difference in how many animals were dying.
 - **Latency was reported without its denominator.** Sleep latency was defined for
-  52 / 71 / 21 / 18 flies of 96 per group. A 6.6× apparent difference sits on the
+  52 / 71 / 21 / 18 channels of 96 per group. A 6.6× apparent difference sits on the
   smallest n — a selection effect that would have become the headline result.
 
 None of these were reachable by the synthetic corpus: each needs a real light-dark

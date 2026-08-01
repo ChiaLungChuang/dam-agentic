@@ -7,6 +7,26 @@ found.** Nothing here is fixed except one docstring note, flagged inline, becaus
 handoff that reads as though the code was already right destroys the evidence that
 the run found anything.
 
+> **Read this before using anything below. Added 2026-07-31; see
+> `HANDOFF-12-monitor-topology.md`.**
+>
+> Every finding in this document was computed **per beam**. On this rig that is not
+> the same as per animal: Monitor1, Monitor2 and Monitor3 are three IR beams at
+> three heights on one apparatus of 32 tubes, watching the **same 32 flies**. So
+> the 384 channels of this session are 128 animals, not 384, and the four groups
+> are 32 animals each, not 96.
+>
+> **Per-beam death detection and per-beam window analysis are not valid for this
+> rig.** Trailing zeros on one beam mean the fly stopped visiting that height, not
+> that it died — which is upstream of Findings 1, 2, 5 and 6, and of the exclusion
+> record they are read from. Question 7 is answered by the same fact and is closed
+> below.
+>
+> The findings are kept **verbatim, as found**. They are not rewritten and not
+> withdrawn: they are accurate descriptions of what the tooling did, and the
+> tooling did it. What changes is what they license you to conclude about the
+> flies.
+
 ---
 
 ## Status in one paragraph
@@ -223,6 +243,16 @@ Two readings are live and the data so far does not separate them:
 **Unresolved.** Worth stating that the second reading, if true, is the more
 serious: it would mean channel index is a lurking variable in a design that
 assigns groups *by* channel range.
+
+> **ANSWERED — see `HANDOFF-12-monitor-topology.md`.** The second reading was
+> right in substance and understated in degree. It is not a hardware, wiring or
+> position effect at a shared channel index: Monitor1, Monitor2 and Monitor3 are
+> three IR beams at three heights on the **same 32 tubes and the same 32 flies**.
+> Channel index is not a confounder shared across monitors — it is the *same
+> animal*, seen three times. One fly breaking three beams explains the aligned
+> last-movement times, the ±1 bin differences, and the suspect flags landing on
+> matching indices. It is not duplication, leakage, or a hardware fault, and it
+> does not need a second experiment. This question is closed.
 
 ### QUESTION 8 — total sleep units are unverified
 

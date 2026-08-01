@@ -289,14 +289,27 @@ mortality, or real per-monitor clocks.
 - **H11-7 (open question) — channel indices repeat across monitors to the minute.**
   Files confirmed raw. Either a one-minute clock offset between monitors, or
   something shared at the same channel index — which would make channel index a
-  confounder in a design that assigns groups by channel range. Needs a second
-  experiment, not a code change.
+  confounder in a design that assigns groups by channel range. ~~Needs a second
+  experiment, not a code change.~~ **ANSWERED and closed by H12-1: it is one fly
+  breaking three beams.** See `docs/HANDOFF-12-monitor-topology.md`.
 - **H11-8 (open question) — total sleep units are unverified.** 4–5 h over 6.7 days
   is too low, and light-phase bout duration × bout count is ~8,919 min against
   ~4,854 min of light phase available — arithmetically impossible over one
   interval. Either the two are computed over different intervals, or dying flies'
   trailing bouts inflate the mean (SD > mean points at the second, which ties to
   H11-3). **Settle before any sleep number leaves this system.**
+- **H12-1 — three monitor files are three beams on one population, and nothing in
+  the system can say so.** Each apparatus is 32 tubes through three stacked
+  detector boards; `Monitor1/2/3` are three IR beams at three heights on the *same
+  32 flies*. So session `dam-7010fc5ebdc9` is 128 animals, not 384, and 32 per
+  group, not 96 — every group mean, SD and n from that run is affected, and
+  per-beam death detection is invalid because trailing zeros mean the fly stopped
+  visiting that height. Explains the 0-empty result and answers H11-7. No input
+  anywhere — `load_experiment`, `assign_groups`, or the declaration — carries the
+  apparatus↔beam relationship, so three racks and three beams are accepted
+  identically and in silence. **Upstream of every H11 item that touches n or
+  death; decide the representation before fixing anything downstream.**
+  `docs/HANDOFF-12-monitor-topology.md`.
 - **The mcp 2.x migration.** `mcp` is capped at `<2` because 2.0.0 removed
   `mcp.server.fastmcp` outright — no `FastMCP` symbol anywhere in the package, no
   top-level `fastmcp` module; `mcp.server` now exposes `mcpserver`, `lowlevel`,
