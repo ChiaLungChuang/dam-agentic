@@ -16,13 +16,37 @@ re-deriving the question.
 
 One **machine** is a rack of 32 vertical glass tubes passing through **three
 stacked detector boards**. Three monitor files per machine are three IR beams at
-three heights on the same 32 tubes and the same 32 flies — plug, middle, food.
-The 20251229 dataset is **four machines × three monitors = twelve files, 384
-channels, 128 animals**.
+three heights on the same 32 tubes and the same 32 flies. The 20251229 dataset is
+**four machines × three monitors = twelve files, 384 channels, 128 animals**.
 
 `load_experiment` and `assign_groups` have no concept of this. So n inflates
 threefold, and per-beam death detection is invalid: trailing zeros on one beam
 mean the fly stopped visiting that height, not that it died.
+
+**The gap this closes is not "we cannot detect beams."** It is that *no input
+anywhere carries the relationship between files* — so three racks and three beams
+are accepted identically, and in silence. Making both directions **sayable** is
+the fix. Detecting one of them is not.
+
+### The 20251229 layout, as recorded
+
+Within a machine the **first** monitor is the food end, the second is central, the
+third is the plug end. The pattern repeats every three:
+
+| Machine | Food end | Central | Plug end | Group |
+|---|---|---|---|---|
+| 1 | Monitor1 | Monitor2 | Monitor3 | `control_EtOH` |
+| 2 | Monitor4 | Monitor5 | Monitor6 | `control_RU` |
+| 3 | Monitor7 | Monitor8 | Monitor9 | `tau_EtOH` |
+| 4 | Monitor10 | Monitor11 | Monitor12 | `tau_RU` |
+
+"Central" and dam-shiny's `middle` are the same slot; this document uses `middle`
+as the key because that is what the reference implementation calls it.
+
+**Note the direction: file order runs food → plug, which is the reverse of the
+order the `$plug, $middle, $food` object naming invites.** An earlier draft of
+this document had it backwards for exactly that reason. The error is left visible
+in recommendation (c), where it is the evidence.
 
 ## What the reference implementation does
 
@@ -94,6 +118,20 @@ The coupling objection is real and I do not think it is fatal: the machine layou
 pre-registered. A design whose n depends on hardware the pre-registration does not
 mention is already under-specified.
 
+**The reference implementation does not solve this, and that is the sharpest
+argument here.** In dam-shiny the role assignment is correct because the operator
+assigns files to named slots correctly, by hand — and **nothing in that app or its
+log records which file went into which slot.** The log prints the upload datapath,
+not the filename. So the relationship is preserved by a human convention that
+leaves no trace: it is right every time until it is wrong once, and when it is
+wrong there is no artifact that disagrees.
+
+That is the *same unrecorded-fact shape as the topology gap itself*, one layer up.
+dam-shiny is being borrowed here for its **combination step** — sum the beams, run
+death detection and sleep on the summed signal — and explicitly **not** as a model
+for how the relationship gets recorded. On that question it is the thing being
+fixed, not the thing being copied.
+
 Inference deserves more than one sentence because it is tempting, and because
 rejecting it *as a decider* is not the same as having no use for it.
 
@@ -113,8 +151,10 @@ recorded.
 ```yaml
 experiment: tau-geneswitch-young-2026-07
 machines:
-  M1: {plug: Monitor1.txt, middle: Monitor2.txt, food: Monitor3.txt}
-  M2: {plug: Monitor4.txt, middle: Monitor5.txt, food: Monitor6.txt}
+  M1: {food: Monitor1.txt,  middle: Monitor2.txt,  plug: Monitor3.txt}
+  M2: {food: Monitor4.txt,  middle: Monitor5.txt,  plug: Monitor6.txt}
+  M3: {food: Monitor7.txt,  middle: Monitor8.txt,  plug: Monitor9.txt}
+  M4: {food: Monitor10.txt, middle: Monitor11.txt, plug: Monitor12.txt}
 groups:
   control_EtOH: 32
 ```
@@ -160,7 +200,7 @@ true statements someone can be held to:
 
 ```yaml
 machines:                                   # a beam rig
-  M1: {plug: Monitor1.txt, middle: Monitor2.txt, food: Monitor3.txt}
+  M1: {food: Monitor1.txt, middle: Monitor2.txt, plug: Monitor3.txt}
 ```
 ```yaml
 machines: independent                       # a rack rig — each file its own animals
@@ -214,13 +254,32 @@ Indices are portable and generic; roles carry meaning and are checkable against
 the rig. Three arguments for roles:
 
 1. **They can be wrong, and wrongness is the point.** `beam: 2` is unfalsifiable —
-   any file can be beam 2. `middle: Monitor7.txt` is a claim someone can check
+   any file can be beam 2. `middle: Monitor8.txt` is a claim someone can check
    against the apparatus. This repo's whole method is making claims checkable.
 2. **The reference implementation names them**, and a Python layer whose vocabulary
    diverges from the R stage-1 reader's makes every cross-check a translation.
 3. **Downstream analysis needs the role, not the position.** Position and zone
    inference — dam-shiny's stage 2 — is *about* which height, so an index would be
    renamed to a role the moment that work started.
+
+**Argument 1 is not hypothetical, and this document is the instance.** The example
+above read `middle: Monitor7.txt` in the first draft. Monitor 7 is a **food end**;
+machine 3's middle is Monitor 8. The whole beam order was mirrored, because
+`$plug, $middle, $food` was given in listed order and read as file order.
+
+That error was caught **by reading the role against the rig** — which is the only
+thing that could have caught it. Written as `beam: 2`, the same mirrored ordering
+would have carried through silently and been unfalsifiable on its face: any file
+can be beam 2, so there is nothing to check and nothing to be wrong. A vocabulary
+whose errors are detectable is worth more than one whose errors do not exist
+because it cannot make claims.
+
+**Blast radius of that mirroring, stated so nobody over-scopes the fix: summing is
+commutative.** A mirrored role order does not change death detection, sleep, or
+any metric computed on the summed signal — those are identical whichever way round
+the three beams are read. It changes **zone assignment and position inference
+only**, which is stage-2 work that does not exist here yet. The correction matters
+for the record and for whoever builds stage 2; it changes no number in this repo.
 
 The portability objection is answerable: this is a closed vocabulary like `PHASES`
 and `METRICS`, so a rig with a different arrangement (two beams, five beams) adds
@@ -265,6 +324,16 @@ position inference and dam-agentic should not foreclose that. What it must not d
 is expose per-beam counts through a tool return; a future `compute_position` would
 return a summary and a handle like everything else.
 
+**Whatever retains per-beam data must retain the ROLE, not the file order.** This
+is not a detail. An ordering convention that lives in how someone happened to
+upload or sort the files is precisely the class of unrecorded fact this whole
+document exists to remove — it is the dam-shiny slot-assignment problem and the
+topology gap, arriving a third time. `Session` must carry `{machine, role, file}`,
+and anything downstream must key on `role`; a positional index into a list of
+three is the same defect wearing a different name. The mirrored-order error in
+(c) is what that failure looks like when the ordering convention is wrong and
+nothing records it.
+
 **One consequence to accept explicitly.** Summing changes what "zero" means. A
 summed channel reads zero only when the fly crossed no beam at any height, which
 is a *stronger* death signal than any single beam — so it does not merely fix the
@@ -296,8 +365,36 @@ across blocks. A concrete signature would read as something like **4.6× at
 distance 1 and 1.0× across a declared boundary** — the ratio, not either number
 alone, is what carries information, because a shared cabinet clock inflates both.
 
-Why `run_qc` and not `load_experiment`: this is a statement about the data, and
-`run_qc` is where statements about the data are made and surfaced as
+### A second thing for it to check: the activity gradient
+
+Once `machines:` declares a role *order*, the data has an opinion about whether
+that order is right.
+
+Within every machine in the 20251229 data, per-channel activity **declines
+monotonically from the first monitor to the third** — roughly **120 of the 128
+channel-triples strictly descending, against about 21 expected under
+independence**. That is consistent with the first beam being the food end, where
+flies aggregate. So **a declared role order that runs against the activity
+gradient is worth flagging.**
+
+**Stated as a candidate, not a settled rule.** A detector-sensitivity gradient
+down the stack would produce the same pattern, and that has never been ruled out.
+Board-to-board sensitivity differences are a mundane hardware fact and nothing
+here distinguishes them from a genuine behavioural gradient. Ruling it out would
+need something like a swap test — the same flies recorded with the boards
+reordered — which nobody has run.
+
+So if it ships, it ships as **"the declaration and the data disagree, look at
+this"** with both numbers attached, and never as a rule that overrides a
+declaration or reorders roles on its own. The failure mode of the strong version
+is exact: a rig with an unusual sensitivity profile would have its correct
+declaration silently contradicted, and a reader would trust the tool over the
+apparatus.
+
+### Where it lives
+
+Why `run_qc` and not `load_experiment`: both checks are statements about the data,
+and `run_qc` is where statements about the data are made and surfaced as
 `decisions_required`. `load_experiment` reports structure.
 
 Why it is not the same as inference-as-decider, in one line: **a cross-check can
@@ -311,7 +408,14 @@ Two things it must not become:
   already covers the case; duplicating it here would put two warnings on one
   situation.
 * A threshold that silently reclassifies. It produces a `decisions_required`
-  entry with the numbers attached, never a changed n.
+  entry with the numbers attached, never a changed n and never a reordered role.
+
+Summary of what the cross-check watches, both candidates:
+
+| Signal | Checks | Confounded by |
+|---|---|---|
+| Same-index cross-monitor enrichment | whether files declared independent are in fact one population | a shared cabinet clock — which is why the *ratio* within vs across boundaries carries the information, not either number |
+| Activity gradient down the stack | whether the declared role **order** is right | detector sensitivity varying by board, never ruled out |
 
 Also worth stating: **`damsim` can plant this now.** With declaration emission in
 place (H13-2), a corpus can carry a `machines:` block and monitor files whose
