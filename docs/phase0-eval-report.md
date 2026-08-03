@@ -29,6 +29,20 @@
 > distinguish an exercised 1.0 from a vacuous one, and the evidence to settle it
 > was not kept, is itself the strongest argument for issue #2.
 >
+> **The sharpest instance is in the harness's own positive control, not in these
+> figures.** `test_positive_control_scores_clean` — the test whose job is to prove
+> a clean run scores clean — asserted `all(pr.passed)` across seven rails while its
+> script exercised **three**. The other four returned the old vacuous `True`. A
+> second assertion in the same test was vacuous too, and was invisible until the
+> first was fixed: five vacuous checks in one control.
+>
+> **The test whose job is to prove the harness reports honestly was resting on the
+> dishonesty it exists to detect.** Issue #1 did not introduce that; issue #1
+> revealed it, and nothing else could have — a vacuous pass is indistinguishable
+> from a real one until "not applicable" exists as a value to report. That outranks
+> the percentages below, which are a symptom of the same thing measured further
+> from the source. See HANDOFF-7 items H18-1 to H18-3.
+>
 > **How much was vacuous — split by what is claimable about THIS report.**
 >
 > Reconstructed traces built to these four task shapes give 16 of 28 property cells
