@@ -137,6 +137,14 @@ class AuditRecord:
     # overridden session carries it too, which is the point: the compute that
     # produces the numbers is the line a reader will have in front of them, and it
     # is the one that most needs to say the n rests on a suppressed refusal.
+    #
+    # The consequence for anyone reading the stream: COUNTING lines with a
+    # non-empty n_overrides counts *calls made on overridden sessions*, not
+    # overrides. One override on a session with twenty subsequent calls appears
+    # twenty-one times. To count overrides, group by session_id first, or filter
+    # to tool == "assign_groups". Stated here because the field name reads like an
+    # event and the value is a state, and that is exactly the misreading a
+    # grep-and-wc would produce.
     n_overrides: list[dict] = field(default_factory=list)
 
     @classmethod

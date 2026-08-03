@@ -228,6 +228,14 @@ and validating — is unverified there. Say "parses and validates", never "works
 looks necessary and obvious. The one exception already granted: repair of
 breakage you caused yourself, where the repair is the correct fix anyway.
 
+**Commit messages go through `git commit -F <file>`, never inline `-m`.** These
+messages quote identifiers in backticks, and an inline message is shell input:
+`` `groups` `` ran as a command and left "the way root is" in a pushed commit,
+while `` `warnings` `` vanished entirely. Same family as every other
+silent-corruption incident here — the output looked plausible, so nothing
+flagged it, and the corruption was in the permanent record rather than in a
+value some check would catch. Write the message to a file and pass it.
+
 **An unpinned major is a claim about a version, not about the code. Check the cap
 when a dependency is added.** This shape has now happened twice: `ruff>=0.6`
 resolved to 0.16.0 and reported 57 findings on unchanged code; `mcp>=1.0` resolved

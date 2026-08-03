@@ -101,6 +101,31 @@ see HANDOFF-9.
 empty `contrasts` list is the normal case, so `groups` is what makes the reply
 useful.
 
+**Second naming wart, same shape, recorded for the same reason:**
+`assign_groups`' **`confirm_n_override` overrides the refusal, not the n.** After
+an accepted override `group_sizes` still returns the computed count — 96, not the
+declared 32 — because the mapping is what was assigned and n is what the mapping
+says. That is the correct behaviour and the wrong name: "override the n" is what
+the parameter sounds like it does, and a caller who believes it will read a
+downstream 96 as a bug in something else.
+
+Blast radius if it is renamed, so the decision is costed rather than guessed:
+
+* **Tool names and parameter names are pinned by the eval layer** — the same
+  constraint that stopped `list_contrasts` being renamed. Layer 1 drives the tool
+  over stdio by keyword argument.
+* The MCP tool schema changes, so **any client `env` block or scripted caller
+  passing the old name breaks** with a validation error naming the missing field.
+  That failure is loud, which is the good case.
+* `tests/test_tools.py` (the override group of tests) and the end-to-end
+  transcript in HANDOFF-13 both name it.
+* No persisted artifact carries the parameter name — `Session.n_overrides` stores
+  `reason` and `confirmed`, not the argument spelling — so **nothing on disk needs
+  migrating.** That is the cheap part.
+
+Neither wart is worth a rename on its own. If the eval layer's pinning is ever
+revisited, both should move in the same change.
+
 `config/contrasts.yaml` is a **template with placeholder labels and cannot load**
 (its `experiment:` value does not match its filename, by design). Real
 declarations live beside it as `config/contrasts-<experiment>.yaml`, one per
@@ -334,6 +359,29 @@ mortality, or real per-monitor clocks.
   Ordering, stated as an opinion and not as a finding: **H13-1 is the higher of
   the two** — it can put a wrong number into a report — and H13-2 is the reason
   neither would be caught automatically.
+
+  **PARTIALLY closed, and deliberately not closed.** `damsim --declarations`
+  (merged in #14) emits a declaration per experiment, alternating a matching one
+  with a planted mismatch, and carries the mapping in `ground_truth.json` so a
+  scorer has both halves of the comparison. So the corpus **can now express** the
+  defect class.
+
+  **Nothing in the harness scores it.** The "4/4 refused or proceeded exactly as
+  planted" result in #14 came from a throwaway script driving the stdio server by
+  hand, not from `damsim/score.py` or the Layer 2 runner. `score.py` grades QC
+  defect classes off `ground_truth.json`'s monitor fields and does not look at
+  `declaration`; no eval task drives `assign_groups` against a generated
+  declaration; nothing in CI would go red if the checksum were deleted tomorrow —
+  only the unit tests would, and those use the hand-written fixture.
+
+  So the item stands, with its wording narrowed: it was filed as "the eval cannot
+  score this class" and the accurate statement is now **"the corpus can express it
+  and nothing runs it."** That is the same shape as the original gap and it is
+  worth saying plainly rather than banking the capability as a fix — a capability
+  nothing exercises is indistinguishable, in CI, from one that does not exist.
+  Closing H13-2 needs a scorer that reads `truth["declaration"]`, drives the
+  mapping, and reports refused-vs-proceeded per experiment as its own per-class
+  precision/recall line.
 - **The mcp 2.x migration.** `mcp` is capped at `<2` because 2.0.0 removed
   `mcp.server.fastmcp` outright — no `FastMCP` symbol anywhere in the package, no
   top-level `fastmcp` module; `mcp.server` now exposes `mcpserver`, `lowlevel`,
