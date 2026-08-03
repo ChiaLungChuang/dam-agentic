@@ -33,6 +33,11 @@ Each record carries:
                       and specs do.
   * ``data_files``  — the monitor files the call touched, resolved server-side.
   * ``outcome``     — ok / refused / error (see OUTCOMES).
+  * ``n_overrides`` — declared-n overrides in force on this call's session: a
+                      pre-registered n that the assignment contradicted and a human
+                      confirmed anyway. A field rather than a fourth outcome, and
+                      carried on every call on that session rather than only on the
+                      assign_groups that created it — see AuditRecord.
   * ``error``       — the model-facing message when outcome != ok.
   * ``duration_ms`` — wall-clock cost of the dispatch.
 
@@ -121,12 +126,25 @@ class AuditRecord:
     outcome: str = "ok"
     error: str | None = None
     duration_ms: float = 0.0
+    # Declared-n overrides in force on this call's session. A FIELD, not a fourth
+    # outcome: an overridden call succeeded, so its outcome is `ok`, and the
+    # ok/refused/error triple is the tool-layer shadow of HANDOFF-5's taxonomy
+    # rather than a vocabulary this module is free to extend. A fourth value would
+    # have to mean something in HANDOFF-5's terms and there is nothing for it to
+    # shadow — the guard did not fire, it fired and was answered.
+    #
+    # "In force on the session", not "created by this call". Every later call on an
+    # overridden session carries it too, which is the point: the compute that
+    # produces the numbers is the line a reader will have in front of them, and it
+    # is the one that most needs to say the n rests on a suppressed refusal.
+    n_overrides: list[dict] = field(default_factory=list)
 
     @classmethod
     def now(cls, *, principal: str, tool: str, session_id: str | None,
             params: dict, data_files: list[str], outcome: str,
             error: str | None = None, duration_ms: float = 0.0,
-            run_id: str = DEFAULT_RUN_ID) -> AuditRecord:
+            run_id: str = DEFAULT_RUN_ID,
+            n_overrides: list[dict] | None = None) -> AuditRecord:
         if outcome not in OUTCOMES:
             raise ValueError(f"outcome must be one of {OUTCOMES}, got {outcome!r}")
         return cls(
@@ -134,6 +152,7 @@ class AuditRecord:
             session_id=session_id, run_id=run_id, params=params,
             data_files=list(data_files),
             outcome=outcome, error=error, duration_ms=duration_ms,
+            n_overrides=list(n_overrides or []),
         )
 
     def to_json(self) -> str:

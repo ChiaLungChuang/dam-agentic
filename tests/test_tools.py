@@ -321,3 +321,75 @@ def test_override_with_both_proceeds_and_surfaces_the_reason(
     assert "ACCEPTED by explicit override" in note
     assert "83 tubes were never loaded" in note
     assert "99" in note and "16" in note
+
+
+# ── H13-1: an accepted override has to reach the record, not just the caller ──
+
+def _override(srv, sid):
+    return srv.assign_groups(
+        sid,
+        {"nmut": {"Monitor1.txt": [1, 16]}, "nctrl": {"Monitor1.txt": [17, 32]}},
+        n_override_reason="83 tubes were never loaded in this run",
+        confirm_n_override=True,
+    )
+
+
+def test_an_accepted_override_is_persisted_to_the_session(srv, monitor_files,
+                                                          monkeypatch):
+    """The warnings list reaches the caller of assign_groups and nothing else.
+    The session is what the report and the audit stream read."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    _override(srv, sid)
+    (rec,) = srv.STORE.get(sid).n_overrides
+    assert rec["group"] == "nctrl"
+    assert rec["declared_n"] == 99 and rec["computed_n"] == 16
+    assert rec["confirmed"] is True
+    assert "83 tubes" in rec["reason"] and rec["at"]
+
+
+def test_the_override_survives_a_store_restart(srv, monitor_files, monkeypatch,
+                                               tmp_path):
+    """It is on disk, not only in the in-memory cache. A record that dies with the
+    process is not a record."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    _override(srv, sid)
+    fresh = SessionStore(state_dir=srv.STORE.state_dir)      # cold, reads from disk
+    assert fresh.get(sid).n_overrides[0]["computed_n"] == 16
+
+
+def test_the_override_is_in_the_tool_return_as_structure_not_only_prose(
+        srv, monitor_files, monkeypatch):
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = _override(srv, sid)
+    (rec,) = res["n_overrides"]
+    assert rec["group"] == "nctrl" and rec["declared_n"] == 99
+    # the prose form is kept as well — a caller reading only warnings loses nothing
+    assert any("ACCEPTED by explicit override" in w for w in res["warnings"])
+
+
+def test_reassigning_without_an_override_clears_the_previous_one(
+        srv, monitor_files, monkeypatch, tmp_path):
+    """Replaced, not appended. A stale justification attached to an assignment
+    that no longer needs one is a false record, which is worse than none."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    _override(srv, sid)
+    assert srv.STORE.get(sid).n_overrides                     # in force
+    srv.assign_groups(sid, {"nmut": {"Monitor1.txt": [1, 16]}})   # no mismatch now
+    assert srv.STORE.get(sid).n_overrides == []
+
+
+def test_a_clean_assignment_records_no_override(srv, monitor_files):
+    pytest.importorskip("yaml")
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(sid, {"CG8093_mut": {"Monitor1.txt": [1, 16]},
+                                  "w1118_ctrl": {"Monitor1.txt": [17, 32]}})
+    assert res["n_overrides"] == []
+    assert srv.STORE.get(sid).n_overrides == []
