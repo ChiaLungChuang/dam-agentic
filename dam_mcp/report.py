@@ -11,11 +11,51 @@ from __future__ import annotations
 from .sessions import Session
 
 
+def _n_override_banner(session: Session) -> list[str]:
+    """The declared-n override, above everything else in the document.
+
+    Not a footnote and not a row in a table of warnings. This report's numbers rest
+    on a refusal that a human suppressed: `assign_groups` found the assigned
+    channel count contradicting the experiment's own pre-registered n, refused, and
+    was overridden. A reader who scrolls to the contrast table and stops must
+    already have passed this. A report that looks clean while resting on a
+    suppressed refusal is the failure this system exists to prevent, so the banner
+    is placed where skipping it takes deliberate effort.
+
+    Empty list — no banner, no placeholder — in the normal case. A permanent
+    "no overrides" line would train the reader to skip the region it lives in."""
+    if not session.n_overrides:
+        return []
+    out = [
+        "> ## ⚠ DECLARED-n OVERRIDE IN FORCE",
+        ">",
+        "> The n below is **not** the n this experiment pre-registered. "
+        "`assign_groups` refused this assignment and a human overrode the refusal.",
+        ">",
+        "> | Group | Declared n | n used | Stated reason |",
+        "> |---|---|---|---|",
+    ]
+    for o in session.n_overrides:
+        out.append(
+            f"> | {o['group']} | {o['declared_n']} | **{o['computed_n']}** | "
+            f"{o.get('reason', '?')} |"
+        )
+    out += [
+        ">",
+        "> Every mean, SD, n and test in this report is computed over the **n "
+        "used** column. Whether that is the right number is the decision recorded "
+        "above; it is not something this report can check.",
+        "",
+    ]
+    return out
+
+
 def render_manifest(session: Session) -> str:
     """Files, window, groups, exclusions + reasons — the grounding for Q&A."""
     lines = [f"# Manifest — {session.name}", ""]
     lines.append(f"Session: `{session.session_id}`  ·  created {session.created_at}")
     lines.append("")
+    lines.extend(_n_override_banner(session))
     lines.append("## Files")
     lines.append("| Monitor | Reads | Channels | Window | Bin (s) |")
     lines.append("|---|---|---|---|---|")
@@ -28,8 +68,10 @@ def render_manifest(session: Session) -> str:
     lines.append("## Groups")
     if session.groups:
         sizes = _group_sizes(session)
+        overridden = {o["group"] for o in session.n_overrides}
         for label in session.group_labels:
-            lines.append(f"- **{label}**: n = {sizes.get(label, 0)}")
+            flag = "  ⚠ **n OVERRIDDEN — see above**" if label in overridden else ""
+            lines.append(f"- **{label}**: n = {sizes.get(label, 0)}{flag}")
     else:
         lines.append("_No groups assigned._")
     lines.append("")

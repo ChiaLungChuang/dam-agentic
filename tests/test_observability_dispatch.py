@@ -255,3 +255,65 @@ async def test_real_load_experiment_audits_the_files(monitor_files, tmp_path,
     assert load, "load_experiment was not audited"
     assert sorted(load[-1]["data_files"]) == sorted(monitor_files)
     assert load[-1]["outcome"] == "ok"
+
+
+# ── H13-1: the override reaches the audit stream through the chokepoint ──────
+
+class _OverriddenSession:
+    """A session whose n contradicts its own pre-registration and was confirmed."""
+    paths = ["/data/Monitor1.txt"]
+    n_overrides = [{"group": "ctrl", "declared_n": 32, "computed_n": 96,
+                    "reason": "one rack was not loaded", "confirmed": True}]
+
+
+@pytest.mark.asyncio
+async def test_an_overridden_session_stamps_every_call_not_just_assign_groups(
+        tmp_path):
+    """Read from the session, so the compute call that produced a number carries
+    the fact that its n rests on a suppressed refusal — not only the
+    assign_groups that created the override, which nobody re-reads."""
+    mcp = FastMCP("ov")
+
+    @mcp.tool()
+    def compute_thing(session_id: str) -> dict:
+        return {"session_id": session_id}
+
+    log_path = tmp_path / "audit.jsonl"
+    observability.instrument_tool_dispatch(
+        mcp, store_provider=lambda: _FakeStore({"dam-1": _OverriddenSession()}),
+        audit_log=audit.AuditLog(log_path))
+    await mcp.call_tool("compute_thing", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["outcome"] == "ok"                       # a field, not an outcome
+    assert rec["n_overrides"][0]["group"] == "ctrl"
+    assert rec["n_overrides"][0]["computed_n"] == 96
+
+
+@pytest.mark.asyncio
+async def test_a_clean_session_audits_an_empty_override_list(mini):
+    """Negative control. Without it, a stamp that fired unconditionally would pass
+    the test above."""
+    mcp, log_path = mini
+    await mcp.call_tool("ok_tool", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["n_overrides"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_without_the_field_does_not_break_the_audit_line(tmp_path):
+    """Best-effort, like data_files: a session written by an older build has no
+    n_overrides attribute at all, and a broken audit line is worse than a missing
+    field."""
+    mcp = FastMCP("old")
+
+    @mcp.tool()
+    def t(session_id: str) -> dict:
+        return {"session_id": session_id}
+
+    log_path = tmp_path / "audit.jsonl"
+    observability.instrument_tool_dispatch(
+        mcp, store_provider=lambda: _FakeStore({"dam-1": _FakeSession(["/a.txt"])}),
+        audit_log=audit.AuditLog(log_path))
+    await mcp.call_tool("t", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["outcome"] == "ok" and rec["n_overrides"] == []

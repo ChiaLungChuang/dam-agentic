@@ -70,6 +70,21 @@ class Session:
     # Exclusions: [{"monitor": ..., "channel": int, "reason": str, "at": iso}]
     exclusions: list[dict] = field(default_factory=list)
 
+    # Accepted declared-n overrides, one per group whose assigned channel count
+    # contradicted the declaration and was allowed through anyway:
+    # [{"group", "declared_n", "computed_n", "reason", "confirmed", "at"}]
+    #
+    # Persisted rather than left in the tool's return, because an override is a
+    # decision about n and n is in every downstream mean, SD and test. In the
+    # return alone it reaches the caller of assign_groups and nothing else — not
+    # the report, not the audit stream — which is the defect shape HANDOFF-11
+    # names four times over: an action taken that does not appear in the record.
+    #
+    # Rewritten wholesale by each assign_groups call, exactly like `groups`: a
+    # re-assignment that no longer needs an override must not inherit the last
+    # one's justification.
+    n_overrides: list[dict] = field(default_factory=list)
+
     # Computed artifacts, all aggregate summaries.
     metrics: dict[str, dict] = field(default_factory=dict)
     contrasts: dict[str, dict] = field(default_factory=dict)

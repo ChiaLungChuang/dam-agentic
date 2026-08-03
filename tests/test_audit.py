@@ -191,3 +191,42 @@ def test_reader_accepts_a_legacy_line_without_a_run_id(tmp_path):
     (back,) = audit.read_audit(p)
     assert back["tool"] == "run_qc"
     assert "run_id" not in back           # absent, and that is fine
+
+
+# ── H13-1: a declared-n override reaches the audit stream ────────────────────
+
+def test_n_overrides_defaults_to_empty_and_does_not_change_the_outcome():
+    """A field, not a fourth outcome. The call succeeded — its outcome is `ok`,
+    and ok/refused/error stays the shadow of HANDOFF-5's taxonomy rather than a
+    vocabulary this module extends on its own."""
+    rec = audit.AuditRecord.now(
+        principal="p", tool="assign_groups", session_id="dam-1",
+        params={}, data_files=[], outcome="ok",
+        n_overrides=[{"group": "ctrl", "declared_n": 32, "computed_n": 96,
+                      "reason": "one rack not loaded", "confirmed": True}],
+    )
+    assert rec.outcome == "ok"
+    assert rec.n_overrides[0]["computed_n"] == 96
+    assert audit.OUTCOMES == ("ok", "refused", "error")     # still three
+
+
+def test_n_overrides_round_trips_through_jsonl():
+    rec = audit.AuditRecord.now(
+        principal="p", tool="compute_sleep", session_id="dam-1",
+        params={}, data_files=[], outcome="ok",
+        n_overrides=[{"group": "ctrl", "declared_n": 32, "computed_n": 96,
+                      "reason": "r", "confirmed": True}],
+    )
+    back = json.loads(rec.to_json())
+    assert back["n_overrides"][0]["group"] == "ctrl"
+    assert back["outcome"] == "ok"
+
+
+def test_a_record_with_no_override_carries_an_empty_list_not_a_missing_key():
+    """Absent-vs-empty matters to whoever greps the stream: a missing key reads as
+    'this build predates the field', an empty list reads as 'no override'."""
+    rec = audit.AuditRecord.now(
+        principal="p", tool="run_qc", session_id="dam-1",
+        params={}, data_files=[], outcome="ok",
+    )
+    assert json.loads(rec.to_json())["n_overrides"] == []

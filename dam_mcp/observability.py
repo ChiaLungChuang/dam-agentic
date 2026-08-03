@@ -186,6 +186,34 @@ def resolve_data_files(arguments: dict, store) -> list[str]:
     return []
 
 
+def _n_overrides(sid, store) -> list[dict]:
+    """Declared-n overrides in force on this session. Best-effort, like
+    resolve_data_files: a missing field or an unreadable session must not turn a
+    successful call into a broken audit line.
+
+    Read from the SESSION rather than from the tool's return value, deliberately.
+    The dispatch wrapper is generic — it does not know what any tool returns, and
+    in production the manager converts results to TextContent before this code
+    could inspect them, so a return-value hook would work in tests and silently do
+    nothing on the wire. The session is the one place the fact is durable and the
+    wrapper already holds a handle to it.
+
+    The consequence is that the field reads "in force on this session at this
+    call", not "this call created it". That is the more useful audit semantics
+    anyway: the compute_* line that produced a number is the line a reader has in
+    front of them, and it is the one that most needs to say the n rests on a
+    suppressed refusal."""
+    if not sid or store is None:
+        return []
+    try:
+        session = store.get(sid)
+        if session is None:
+            return []
+        return list(getattr(session, "n_overrides", []) or [])
+    except Exception:
+        return []
+
+
 # ── the instrumentation pass ────────────────────────────────────────────────
 
 def _classify(exc: Exception) -> tuple[str, str]:
@@ -256,6 +284,10 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
                     _status_ok(span)
                     if outcome == "refused":
                         span.add_event("tool.refused", {"dam.error": error or ""})
+                overrides = _n_overrides(sid, store)
+                if overrides:
+                    span.set_attribute("dam.n_overridden_groups",
+                                       [o.get("group", "?") for o in overrides])
                 log = audit_log or audit.AuditLog()
                 log.record(audit.AuditRecord.now(
                     principal=audit.default_principal(),
@@ -263,6 +295,7 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
                     params=arguments if isinstance(arguments, dict) else {},
                     data_files=files, outcome=outcome, error=error,
                     duration_ms=round(duration_ms, 3),
+                    n_overrides=overrides,
                 ))
 
     manager.call_tool = call_tool

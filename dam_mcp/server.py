@@ -380,9 +380,13 @@ def assign_groups(
     _check_group_labels(set(sizes))             # refuses an undeclared label
     # Before the save: a refused assignment must not persist, or the next call
     # sees groups the checksum already rejected.
-    n_notes = _check_declared_n(sizes, n_override_reason, confirm_n_override)
+    n_overrides = _check_declared_n(sizes, n_override_reason, confirm_n_override)
 
     session.groups = groups
+    # Replaced, not appended: a re-assignment that needs no override must not
+    # inherit the previous call's justification, the same way it does not inherit
+    # the previous call's channels.
+    session.n_overrides = n_overrides
     STORE.save(session)
 
     assigned = {(g["monitor"], g["channel"]) for g in groups}
@@ -393,12 +397,12 @@ def assign_groups(
         if (m["file"], ch) not in assigned
     ]
     warnings = [w for w in (_confound_warning(groups),
-                            _unassigned_declared_warning(set(sizes))) if w]
-    warnings += n_notes                          # an accepted declared-n override
+                            _unassigned_declared_warning(set(sizes)),
+                            _n_override_warning(n_overrides)) if w]
     warnings += _declaration_warnings()          # e.g. ignored values under groups:
     return GroupResult(
         session_id=session_id, group_sizes=sizes, unassigned=unassigned,
-        warnings=warnings,
+        warnings=warnings, n_overrides=n_overrides,
     ).model_dump()
 
 
@@ -841,9 +845,10 @@ def _check_group_labels(assigned: set[str]) -> None:
 
 
 def _check_declared_n(sizes: dict[str, int], reason: str | None,
-                      confirm: bool) -> list[str]:
-    """Compare assigned n against the declaration's declared n. Returns the notes
-    to surface when a mismatch was explicitly overridden; raises otherwise.
+                      confirm: bool) -> list[dict]:
+    """Compare assigned n against the declaration's declared n. Returns one record
+    per accepted override when a mismatch was explicitly confirmed; raises
+    otherwise. An empty list is the normal case and means nothing was overridden.
 
     Why a checksum and not a fix: the declaration states how many independent
     animals a group has, and the mapping states which channels carry them. Those
@@ -892,11 +897,34 @@ def _check_declared_n(sizes: dict[str, int], reason: str | None,
             f"is genuinely right — a tube not loaded, say — {missing}. Nothing was "
             "assigned."
         )
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
     return [
-        f"Declared-n mismatch ACCEPTED by explicit override: {detail}. Reason "
-        f"given: {str(reason).strip()}. The assignment used the computed count, "
-        "not the declared one; n is what the mapping says."
+        {"group": label, "declared_n": d, "computed_n": c,
+         "reason": str(reason).strip(), "confirmed": True, "at": now}
+        for label, (d, c) in mismatches.items()
     ]
+
+
+def _n_override_warning(overrides: list[dict]) -> str | None:
+    """The human-readable form of an accepted override, for the warnings list.
+
+    Kept alongside the structured record rather than replaced by it: the record is
+    what the report and the audit stream read, the sentence is what a caller who
+    only looks at `warnings` sees. Dropping the sentence would make this change a
+    regression for that reader."""
+    if not overrides:
+        return None
+    detail = "; ".join(
+        f"'{o['group']}' declares n={o['declared_n']} but this mapping assigns "
+        f"{o['computed_n']} channel(s)"
+        for o in overrides
+    )
+    return (
+        f"Declared-n mismatch ACCEPTED by explicit override: {detail}. Reason "
+        f"given: {overrides[0]['reason']}. The assignment used the computed count, "
+        "not the declared one; n is what the mapping says."
+    )
 
 
 def _declaration_warnings() -> list[str]:

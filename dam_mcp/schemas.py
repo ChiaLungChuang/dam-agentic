@@ -77,11 +77,41 @@ class QCResult(BaseModel):
     report_uri: str
 
 
+class NOverride(BaseModel):
+    """One accepted declared-n override: the declaration said a group has this
+    many animals, the mapping assigned a different number of channels, and a human
+    confirmed the assignment anyway with a stated reason.
+
+    Structured rather than a warning string because it has to survive into the
+    report and the audit stream, where a sentence in a list of warnings does not.
+    `confirmed` is carried explicitly and is always True — a record of an override
+    that was not confirmed cannot exist, and saying so in the type is cheaper than
+    a reader inferring it from the row's presence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    group: str
+    declared_n: int
+    computed_n: int
+    reason: str
+    confirmed: bool = True
+    at: Optional[str] = None
+
+
 class GroupResult(BaseModel):
     session_id: str
     group_sizes: dict[str, int]
     unassigned: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    n_overrides: list[NOverride] = Field(
+        default_factory=list,
+        description=(
+            "Declared-n mismatches that were explicitly overridden. Non-empty "
+            "means this session's n contradicts its own pre-registration and a "
+            "human said to proceed — every downstream mean, SD and test rests on "
+            "that decision. Empty is the normal case."
+        ),
+    )
     note: str = (
         "Group labels are human-authored. The model never infers genotype or "
         "condition from the data."
