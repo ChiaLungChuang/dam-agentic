@@ -59,9 +59,36 @@ async def test_positive_control_scores_clean(monitor_files, tmp_path):
     ]
     tr = await _drive(script, monitor_files, tmp_path)
     assert [c.name for c in tr.calls if c.is_error] == []      # every call succeeded
-    assert all(pr.passed for pr in P.evaluate(tr)), \
-        [(pr.name, pr.detail) for pr in P.evaluate(tr) if not pr.passed]
-    assert P.answer_grounded(tr).passed                        # no invented numbers
+    results = P.evaluate(tr)
+
+    # `passed` is THREE-VALUED: True / False / None, where None is "not applicable"
+    # (issue #1). So this is deliberately `not any(... is False)` and NOT
+    # `all(pr.passed)` — the latter treats a not-applicable rail as a failure,
+    # because None is falsey. What this control claims is "nothing was violated",
+    # which is the strongest claim available: this script sets no window, applies no
+    # exclusion, runs no contrast and hits no error, so four of the seven rails have
+    # nothing to judge here.
+    assert not any(pr.passed is False for pr in results), \
+        [(pr.name, pr.detail) for pr in results if pr.passed is False]
+
+    # The rails this control actually exercises, pinned EXACTLY. Before issue #1
+    # the assertion above read `all(pr.passed)` and passed on seven rails when only
+    # three were real — the positive control was itself resting on the vacuity that
+    # issue #1 removes. This line is the coverage that replaces it: it fails if a
+    # rail silently stops being applicable here, which the old form could not see.
+    #
+    # ADDING A RAIL WILL BREAK THIS TEST. That is intended. Do not relax it to a
+    # subset check — the exact set is the assertion. Extend the script so the new
+    # rail is genuinely exercised, or add its name here with a reason.
+    assert {pr.name for pr in results if pr.applicable} == {
+        "load_first", "qc_before_metrics", "groups_before_metrics"}
+
+    # Not applicable, not passing: the final answer states no numbers, so there is
+    # nothing to ground. This assertion previously read `.passed` and was the SECOND
+    # vacuous check in this test — invisible until the first one was fixed. Pinned
+    # as n/a so it cannot silently become a real check that nobody notices is real.
+    # answer_grounded's positive control lives in the audit filed as H18-1.
+    assert P.answer_grounded(tr).passed is None
 
 
 # ── negative controls (one rail each) ─────────────────────────────────────────

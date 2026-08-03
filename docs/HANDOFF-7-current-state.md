@@ -382,6 +382,43 @@ mortality, or real per-monitor clocks.
   Closing H13-2 needs a scorer that reads `truth["declaration"]`, drives the
   mapping, and reports refused-vs-proceeded per experiment as its own per-class
   precision/recall line.
+- **H18-1 — the positive control was itself vacuous, and that is the finding.**
+  `test_positive_control_scores_clean` asserted `all(pr.passed)` over seven rails
+  while its script exercised **three**: it sets no window, applies no exclusion,
+  runs no contrast and hits no error, so four rails returned the old vacuous
+  `True` and the assertion passed on them. A second assertion in the same test
+  (`answer_grounded`) was vacuous too and was invisible until the first was fixed
+  — five vacuous checks, not four. **The test whose job is to prove the harness
+  reports honestly was resting on the dishonesty it exists to detect.** Issue #1
+  did not introduce this; issue #1 revealed it, and nothing else would have — a
+  vacuous pass is indistinguishable from a real one until not-applicable exists as
+  a value. Closed in the issue #1 PR by pinning the applicable set exactly.
+- **H18-2 (open) — most rails have no END-TO-END positive control.** Audited across
+  the suite. At the unit level all seven structural rails have a positive control
+  in `tests/test_properties.py`, on hand-built traces. At the **end-to-end** level
+  — driving the real stdio server through `ScriptedModel` — only three of seven do
+  (`load_first`, `qc_before_metrics`, `groups_before_metrics`), which is exactly
+  what H18-1 exposed. `answer_grounded` has **no positive control at any level**:
+  its only test is the negative one at `test_fake_agent.py:103`. A rail that always
+  failed end-to-end, or one whose real-server behaviour diverges from the
+  hand-built trace, could go unnoticed. Negative controls prove a rail fires; they
+  do not prove it passes when it should.
+- **H18-3 (open) — the CI `eval` job does not exercise `evals/scoring.py`.** Found
+  while ruling the job out as the casualty of issue #1's red run. It runs
+  `damsim/generate.py` + `damsim/score.py`, which grade the **corpus defect
+  detector** — they never import `evals.scoring` or `evals.properties`. So a change
+  to `aggregate` or `evaluate` passes that job untouched, and the property layer's
+  only end-to-end exercise anywhere in CI is one engine-gated test in
+  `test_fake_agent.py`. The job name promises coverage the job does not provide.
+
+  **These three are one family, and naming the family is worth more than the three
+  entries.** H13-2: the corpus could *express* a defect and nothing *ran* it.
+  Issue #1: the harness *ran* the rails and scored them *vacuously*. H18-3: a whole
+  layer has almost no CI surface at all. Each is a different distance along the
+  same axis — **the gap between machinery that exists and machinery that is
+  exercised** — and in every case the artifact looked green while measuring less
+  than its name implied. When adding to the eval layer, the question to ask is not
+  "does this work" but "what turns red if I delete it".
 - **The mcp 2.x migration.** `mcp` is capped at `<2` because 2.0.0 removed
   `mcp.server.fastmcp` outright — no `FastMCP` symbol anywhere in the package, no
   top-level `fastmcp` module; `mcp.server` now exposes `mcpserver`, `lowlevel`,
