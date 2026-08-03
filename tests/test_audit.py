@@ -230,3 +230,64 @@ def test_a_record_with_no_override_carries_an_empty_list_not_a_missing_key():
         params={}, data_files=[], outcome="ok",
     )
     assert json.loads(rec.to_json())["n_overrides"] == []
+
+
+# ── the counting field (H13-1 follow-on) ─────────────────────────────────────
+
+def test_override_accepted_here_is_the_field_you_sum():
+    """n_overrides is a state carried by every call on the session;
+    override_accepted_here is an event true on exactly one. Summing the second
+    counts decisions, summing the first counts calls."""
+    session_overrides = [{"group": "ctrl", "declared_n": 32, "computed_n": 96,
+                          "reason": "one rack not loaded", "confirmed": True}]
+    stream = [
+        audit.AuditRecord.now(principal="p", tool="assign_groups",
+                              session_id="dam-1", params={}, data_files=[],
+                              outcome="ok", n_overrides=session_overrides,
+                              override_accepted_here=True),
+        audit.AuditRecord.now(principal="p", tool="run_qc", session_id="dam-1",
+                              params={}, data_files=[], outcome="ok",
+                              n_overrides=session_overrides,
+                              override_accepted_here=False),
+        audit.AuditRecord.now(principal="p", tool="compute_sleep",
+                              session_id="dam-1", params={}, data_files=[],
+                              outcome="ok", n_overrides=session_overrides,
+                              override_accepted_here=False),
+    ]
+    assert sum(1 for r in stream if r.n_overrides) == 3          # calls
+    assert sum(1 for r in stream if r.override_accepted_here) == 1  # decisions
+
+
+def test_absence_is_none_and_none_is_not_false():
+    """A record written before the field exists has no key. Reading that as False
+    would assert 'this call did not accept an override' about a record that never
+    recorded either way."""
+    rec = audit.AuditRecord.now(principal="p", tool="run_qc", session_id="dam-1",
+                                params={}, data_files=[], outcome="ok")
+    assert rec.override_accepted_here is None
+    assert rec.override_accepted_here is not False
+
+
+def test_an_old_audit_line_parses_and_reads_as_unknown(tmp_path):
+    """The concrete back-compatibility case: JSONL on disk from before this field.
+    It must load, and the missing key must surface as None rather than False."""
+    old_line = json.dumps({
+        "timestamp": "2026-08-01T00:00:00+00:00", "principal": "anonymous",
+        "tool": "assign_groups", "session_id": "dam-old", "run_id": "r",
+        "params": {}, "data_files": [], "outcome": "ok", "error": None,
+        "duration_ms": 1.0, "n_overrides": [],
+    })
+    path = tmp_path / "old.jsonl"
+    path.write_text(old_line + "\n")
+    (rec,) = audit.read_audit(path)
+    assert "override_accepted_here" not in rec           # absent, not false
+    assert rec.get("override_accepted_here") is None
+    assert rec.get("override_accepted_here") is not False
+
+
+def test_the_field_round_trips_through_jsonl():
+    for value in (True, False, None):
+        rec = audit.AuditRecord.now(principal="p", tool="assign_groups",
+                                    session_id="dam-1", params={}, data_files=[],
+                                    outcome="ok", override_accepted_here=value)
+        assert json.loads(rec.to_json())["override_accepted_here"] is value

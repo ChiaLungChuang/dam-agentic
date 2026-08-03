@@ -186,6 +186,42 @@ def resolve_data_files(arguments: dict, store) -> list[str]:
     return []
 
 
+#: Tools that can accept a declared-n override. `assign_groups` is the only one:
+#: it is where the checksum runs, and it REPLACES session.n_overrides wholesale on
+#: every success. That replacement is what makes the event exact rather than
+#: heuristic — a successful assign_groups leaving overrides in force is
+#: necessarily the call that accepted them, and re-running the identical override
+#: is correctly reported as another acceptance. A before/after diff of the session
+#: would get that case wrong by reporting no change.
+OVERRIDE_CREATING_TOOLS = frozenset({"assign_groups"})
+
+
+def _override_accepted_here(name, outcome, sid, store) -> bool | None:
+    """Did THIS call accept a declared-n override? The counting field.
+
+    Three-valued on purpose. `False` is a claim — "this call did not accept one" —
+    and it is only made where it is known. `None` means unknown, and the one case
+    that produces it is a session the dispatch could not read; a reader must also
+    treat the key's absence in older audit lines as None.
+
+    A non-override tool is `False` rather than `None` because it is genuinely
+    known: no other tool can accept one. A refused or errored assign_groups is
+    `False` for the same reason — nothing was assigned, so nothing was accepted."""
+    if name not in OVERRIDE_CREATING_TOOLS:
+        return False
+    if outcome != "ok":
+        return False
+    if not sid or store is None:
+        return None
+    try:
+        session = store.get(sid)
+    except Exception:
+        return None
+    if session is None:
+        return None
+    return bool(getattr(session, "n_overrides", None))
+
+
 def _n_overrides(sid, store) -> list[dict]:
     """Declared-n overrides in force on this session. Best-effort, like
     resolve_data_files: a missing field or an unreadable session must not turn a
@@ -285,9 +321,12 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
                     if outcome == "refused":
                         span.add_event("tool.refused", {"dam.error": error or ""})
                 overrides = _n_overrides(sid, store)
+                accepted = _override_accepted_here(name, outcome, sid, store)
                 if overrides:
                     span.set_attribute("dam.n_overridden_groups",
                                        [o.get("group", "?") for o in overrides])
+                if accepted:
+                    span.add_event("tool.n_override_accepted")
                 log = audit_log or audit.AuditLog()
                 log.record(audit.AuditRecord.now(
                     principal=audit.default_principal(),
@@ -296,6 +335,7 @@ def instrument_tool_dispatch(mcp, store_provider: Callable[[], object] | None = 
                     data_files=files, outcome=outcome, error=error,
                     duration_ms=round(duration_ms, 3),
                     n_overrides=overrides,
+                    override_accepted_here=accepted,
                 ))
 
     manager.call_tool = call_tool
