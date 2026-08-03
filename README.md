@@ -199,6 +199,19 @@ pytest                                                    # the suite
 python damsim/generate.py --out /tmp/corpus --seed 42 --adversarial   # eval corpus
 ```
 
+Add `--declarations` to emit a pre-registration file per experiment
+(`contrasts-exp_000.yaml`, alternating a matching declaration with a planted
+declared-n mismatch), so the declared-n checksum is scorable rather than
+invisible. `DAM_PREREG_PATH` has no default, so point the server at one per
+experiment — the path is in that experiment's `ground_truth.json` under
+`declaration.path` and in the corpus `manifest.json`:
+
+```bash
+DAM_PREREG_PATH=/tmp/corpus/exp_000/contrasts-exp_000.yaml python -m dam_mcp.server
+```
+
+Without the flag the corpus is byte-identical to one generated before it existed.
+
 CI runs `lint`, `test` on Python 3.11/3.12/3.13, and `eval` as independent jobs:
 **260 passed / 0 skipped / 260 collected**.
 
