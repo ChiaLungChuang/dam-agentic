@@ -94,10 +94,19 @@ The coupling objection is real and I do not think it is fatal: the machine layou
 pre-registered. A design whose n depends on hardware the pre-registration does not
 mention is already under-specified.
 
-Inference deserves one more sentence because it is tempting: HANDOFF-12's evidence
-chain has five links, four of them data-side, and **none of the four settles it.**
-The photographs did. A tool with access only to the four would be guessing, and
-this repo's rule is that it flags rather than decides.
+Inference deserves more than one sentence because it is tempting, and because
+rejecting it *as a decider* is not the same as having no use for it.
+
+HANDOFF-12's evidence chain has five links, four of them data-side, and **none of
+the four settles it.** The photographs did. A tool with access only to the four
+would be guessing, and this repo's rule is that it flags rather than decides. So
+inference must not choose the topology.
+
+**But it makes a good cross-check, and that is a real job — see the follow-on
+below.** The declaration decides; the data says whether the declaration is
+plausible. That division is exactly the one this repo already draws everywhere
+else, and it is what makes a declared topology *checkable* rather than merely
+recorded.
 
 **Shape sketch, illustrative only:**
 
@@ -117,42 +126,85 @@ than channels — which is what the declared n was always supposed to mean.
 
 ## (b) What an undeclared topology defaults to
 
-**Recommendation: default to independent, and warn loudly when the multi-beam
-signature is present. Do not refuse.**
+**Recommendation: default to independent, and warn on the *declaration* being
+absent — not on the data looking multi-beam. Declaring topology either way
+silences it. Do not refuse.**
 
-This is the recommendation I hold least confidently, and the precedent cuts
-against it, so the reasoning matters more than the answer.
+### Why the warning fires on the declaration, not the shape
 
-`DAM_PREREG_PATH` went to no-default-and-refuse on the argument that a stale
-config should fail visibly rather than silently load the wrong declaration. **That
-reasoning does not transfer**, for one reason: there, a default existed and was
-*wrong for everyone* — loading a template made an unregistered comparison look
-registered, in every case, with no correct reading. Here, "these files are
-independent" is **correct** for every single-beam rig, which is the ordinary DAM
-setup and most of the installed base. Refusing until declared would break every
-existing declaration to protect against a layout that most users do not have.
+A first draft of this section put the warning on the data signature: repeated
+channel indices with correlated last-movement times across files. **That was
+wrong, and the repo had already decided why.**
 
-That is not a comfortable answer, because HANDOFF-12 says plainly that the failure
-is silent in both directions. So the default must not be silent:
+PR #6 set the principle. `declaration_warnings()` stays quiet when a `groups:`
+mapping carries no values, because there is no ignored input to warn about, and a
+warning where nothing is wrong teaches the reader to skip warnings — including the
+one that matters. A signature-triggered warning fails that test outright: **it
+fires on every legitimate three-rack rig**, because HANDOFF-12's own finding is
+that the two shapes are *indistinguishable from the data*. A three-rack lab would
+see it on every run forever with no way to silence it, and a warning that correct
+usage cannot clear is a warning people learn to ignore.
 
-* When a session's files show the multi-beam signature — repeated channel indices
-  with correlated last-movement times across files — `load_experiment` **warns**,
-  naming the files, saying what the two readings are, and pointing at `machines:`.
-  Detection is used to *ask*, never to decide, which is the same line
-  `decline_ratio` already draws.
-* When `groups:` declares an integer n, the checksum in PR #13 already refuses the
-  3× case outright. A lab that declares n gets a hard stop today.
+Warning on the absence of a declaration is a different claim, and a better one:
 
-The pair — hard refusal where an n is declared, loud warning where it is not — gets
-most of the safety of refuse-until-declared without breaking a repo full of valid
-single-beam declarations.
+| | Signature-triggered | Declaration-triggered |
+|---|---|---|
+| What it asserts | "your hardware looks like three beams" — a guess | "you have not said how these files relate" — a fact the tool knows |
+| Can it be wrong? | Yes, on every three-rack rig | No. It is a statement about the declaration |
+| Can correct usage silence it? | **No** | Yes, in one line, either direction |
+| Existing declarations | unaffected but permanently noisy | unaffected, quiet after one edit |
 
-**If you would rather have the loud version:** refuse-until-declared, with
-`machines:` required in every declaration and `machines: independent` as the
-explicit opt-out. It is defensible, it is more in keeping with the
-`DAM_PREREG_PATH` precedent than what I have recommended, and its cost is a
-one-line edit to every existing declaration plus every test fixture. If the
-installed base is one lab, that cost is near zero and I would switch.
+So: **`load_experiment` warns when a session loads more than one monitor file and
+the declaration says nothing about topology.** Two ways to clear it, and both are
+true statements someone can be held to:
+
+```yaml
+machines:                                   # a beam rig
+  M1: {plug: Monitor1.txt, middle: Monitor2.txt, food: Monitor3.txt}
+```
+```yaml
+machines: independent                       # a rack rig — each file its own animals
+```
+
+The single-file case is scoped out, and that is not shape-inference sneaking back
+in: with one monitor there is no relationship between files to declare, so the
+question does not arise.
+
+**This is what actually closes HANDOFF-12's silent-in-both-directions gap.** That
+finding was not "we cannot detect beams" — it was that *no input anywhere carries
+the relationship*, so three racks and three beams are accepted identically and in
+silence. Making both directions **sayable** is the fix. Detecting one of them is
+not.
+
+### Why soft rather than refuse: the loud path already exists
+
+The stronger argument for not refusing is not "most rigs are single-beam". It is
+that **the design is already two-tier, and the loud tier shipped in PR #13**:
+
+| Declaration | Behaviour on a three-beam mapping | Status |
+|---|---|---|
+| `groups:` declares an integer n | **Hard refusal**, naming the group, the declared n and the computed n | **Works today** — see the transcript above |
+| `groups:` declares no n | Warning that topology is undeclared | Proposed here |
+
+A lab that declares an n gets a hard stop **now**, with no topology code in the
+repo. Refuse-until-declared would add a second hard stop for people who already
+have one, and impose it on people who declared nothing precisely because they had
+nothing to declare. The tier that is missing is the *soft* one, and that is the
+one this recommends.
+
+`DAM_PREREG_PATH`'s no-default-and-refuse precedent still does not transfer, for
+the reason it never did: there a default existed and was *wrong for everyone* —
+loading a template made an unregistered comparison look registered, in every case,
+with no correct reading. Here "independent" is **correct** for every single-beam
+rig. But that argument is now the second one, not the first.
+
+**If you would rather have the loud version anyway:** require `machines:` in every
+declaration, with `machines: independent` as the explicit opt-out. Its cost is a
+one-line edit to every existing declaration and every test fixture; if the
+installed base is one lab that is near zero, and I would not argue hard against
+it. What it buys over the recommendation is the case of a beam rig that declares
+no n *and* ignores the warning — which the warning at least names, and which
+nothing at all names today.
 
 ## (c) Vocabulary
 
@@ -221,6 +273,51 @@ It does not, however, fix HANDOFF-11's Finding 2: `death_hours=12` against a 12:
 cycle still collapses "asleep" into "dead" on the summed signal. **These are two
 defects and topology only closes one.**
 
+## Follow-on: a `run_qc` check that the declaration matches the data
+
+**In scope for this document, as a follow-on to (a)+(b) rather than part of
+either.** It is not needed for topology to work, and it must not gate it — but
+without it a declared topology is recorded and never checked, and this repo's
+method is making claims checkable.
+
+The division of labour, stated so it cannot drift:
+
+* **The declaration decides.** `machines:` or `machines: independent` is the
+  answer, and nothing in the data overrides it.
+* **`run_qc` flags disagreement.** Same-index cross-monitor correlation is a
+  measurable property. A session declared `independent` whose files show strong
+  same-index enrichment between adjacent monitors and none across declared
+  boundaries is *worth surfacing* — not because the tool knows better, but because
+  one of the two is wrong and only a human can say which.
+
+The shape of the evidence, from HANDOFF-12's Question 7: enrichment of matched
+last-movement times at the same channel index, high within a block and at baseline
+across blocks. A concrete signature would read as something like **4.6× at
+distance 1 and 1.0× across a declared boundary** — the ratio, not either number
+alone, is what carries information, because a shared cabinet clock inflates both.
+
+Why `run_qc` and not `load_experiment`: this is a statement about the data, and
+`run_qc` is where statements about the data are made and surfaced as
+`decisions_required`. `load_experiment` reports structure.
+
+Why it is not the same as inference-as-decider, in one line: **a cross-check can
+only ever raise a question, and it raises it against a claim someone already
+made.** Inference-as-decider would answer the question with nothing to check
+against.
+
+Two things it must not become:
+
+* A check that fires when *no* topology is declared. That is (b)'s warning and it
+  already covers the case; duplicating it here would put two warnings on one
+  situation.
+* A threshold that silently reclassifies. It produces a `decisions_required`
+  entry with the numbers attached, never a changed n.
+
+Also worth stating: **`damsim` can plant this now.** With declaration emission in
+place (H13-2), a corpus can carry a `machines:` block and monitor files whose
+same-index structure either matches it or does not — so the check is testable
+against planted ground truth rather than only against the one real dataset.
+
 ---
 
 ## What this does to the existing record
@@ -277,3 +374,6 @@ nothing to select. That guard is structural, not procedural.
 4. Add a `damsim` corpus case that plants three-beams-on-one-population. The
    generator can now emit declarations (H13-2), so a machine block is expressible;
    without a planted case the eval will keep scoring this class as clean.
+5. The `run_qc` declaration-vs-data cross-check, last. It depends on a declaration
+   existing to check against, so it cannot precede (a), and it is the piece that
+   turns a declared topology from recorded into checkable.
