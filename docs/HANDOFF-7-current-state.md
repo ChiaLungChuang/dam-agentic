@@ -310,6 +310,30 @@ mortality, or real per-monitor clocks.
   identically and in silence. **Upstream of every H11 item that touches n or
   death; decide the representation before fixing anything downstream.**
   `docs/HANDOFF-12-monitor-topology.md`.
+- **H13-1 — an accepted n-override is not in the record.** `assign_groups` refuses
+  a mapping whose channel count contradicts the declaration's declared n, and the
+  override (`n_override_reason` + `confirm_n_override=true`) is surfaced only in
+  the result's `warnings`. It is **not persisted to the session**, so it reaches
+  neither the rendered report nor the audit record: an overridden n can appear in
+  a report with nothing recording that it was overridden, or why. Needs a schema
+  field — `GroupResult` and the session both have nowhere to put it — which is why
+  it was left out of the checksum's scope rather than bolted on. This is the same
+  defect shape HANDOFF-11 documents four times over: an action taken that does not
+  appear in the record. **Settle before an overridden n reaches a report.**
+- **H13-2 (structural) — `damsim` cannot express a declared n, so the eval cannot
+  score this defect class.** The generator emits monitor files only; it has no
+  declaration emitter, so a generated corpus cannot state a declared n at all,
+  let alone one that disagrees with the channels a mapping assigns.
+  `tests/fixtures/contrasts-nmismatch.yaml` is the first declaration in the suite
+  able to express a declared n, and it is a hand-written fixture, not corpus
+  output. Same structural gap HANDOFF-11 named for the context-shaped findings: a
+  generator that plants the ground truth cannot plant a defect it has no
+  vocabulary for, so the whole class is invisible to scoring rather than scored
+  and missed.
+
+  Ordering, stated as an opinion and not as a finding: **H13-1 is the higher of
+  the two** — it can put a wrong number into a report — and H13-2 is the reason
+  neither would be caught automatically.
 - **The mcp 2.x migration.** `mcp` is capped at `<2` because 2.0.0 removed
   `mcp.server.fastmcp` outright — no `FastMCP` symbol anywhere in the package, no
   top-level `fastmcp` module; `mcp.server` now exposes `mcpserver`, `lowlevel`,

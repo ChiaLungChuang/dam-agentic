@@ -6,6 +6,8 @@ decorator returns the original function unchanged, so the tools are called here 
 plain functions with server.STORE pointed at a throwaway state dir.
 """
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("mcp")
@@ -190,3 +192,132 @@ def test_compute_before_qc_is_refused(srv, monitor_files):
     # no QC yet -> guard refuses (metrics before QC aren't trustworthy)
     with pytest.raises(ToolError):
         srv.compute_sleep(sid)
+
+
+# ── declared-n checksum (HANDOFF-12) ─────────────────────────────────────────
+#
+# The declaration says how many independent animals a group has; the mapping says
+# which channels carry them. Two statements of one number, never compared until
+# now — which is how 96 channels were accepted as 96 animals when they were 32
+# seen three times. This is a checksum, not a model of the apparatus.
+
+FIXTURE_N = Path(__file__).resolve().parent / "fixtures" / "contrasts-nmismatch.yaml"
+
+
+def _pin(monkeypatch, path):
+    monkeypatch.setenv("DAM_PREREG_PATH", str(path))
+
+
+def test_declared_n_mismatch_refuses_and_names_all_three_numbers(
+        srv, monitor_files, monkeypatch):
+    """nctrl declares 99; [17, 32] assigns 16. The refusal has to carry the group,
+    the declared n and the computed n — a bare 'mismatch' leaves the caller to
+    guess which side moved."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    with pytest.raises(ToolError) as exc:
+        srv.assign_groups(sid, {"nmut": {"Monitor1.txt": [1, 16]},
+                                "nctrl": {"Monitor1.txt": [17, 32]}})
+    msg = str(exc.value)
+    assert "nctrl" in msg and "99" in msg and "16" in msg
+    assert "Nothing was assigned" in msg
+
+
+def test_a_refused_mismatch_does_not_persist_the_assignment(
+        srv, monitor_files, monkeypatch):
+    """The refusal is before the save. Otherwise the next call reads groups the
+    checksum already rejected, and the refusal is advisory."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    with pytest.raises(ToolError):
+        srv.assign_groups(sid, {"nmut": {"Monitor1.txt": [1, 16]},
+                                "nctrl": {"Monitor1.txt": [17, 32]}})
+    assert srv.STORE.get(sid).groups == []
+
+
+def test_declared_n_match_proceeds(srv, monitor_files, tmp_path, monkeypatch):
+    """The positive control. Without it, a checksum that refused everything would
+    pass the negative tests above."""
+    pytest.importorskip("yaml")
+    decl = tmp_path / "contrasts-nok.yaml"
+    decl.write_text("experiment: nok\ngroups:\n  nmut: 16\n  nctrl: 16\n")
+    _pin(monkeypatch, decl)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(sid, {"nmut": {"Monitor1.txt": [1, 16]},
+                                  "nctrl": {"Monitor1.txt": [17, 32]}})
+    assert res["group_sizes"] == {"nmut": 16, "nctrl": 16}
+    assert not any("Declared-n" in w for w in res["warnings"])
+
+
+def test_no_declared_n_proceeds_unchanged(srv, monitor_files):
+    """The list form declares no n. Every declaration written before this check
+    looks like this, and none of them may start failing."""
+    pytest.importorskip("yaml")
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(sid, {"CG8093_mut": {"Monitor1.txt": [1, 16]},
+                                  "w1118_ctrl": {"Monitor1.txt": [17, 32]}})
+    assert res["group_sizes"] == {"CG8093_mut": 16, "w1118_ctrl": 16}
+    assert not any("Declared-n" in w for w in res["warnings"])
+
+
+def test_a_declared_group_with_nothing_assigned_is_not_a_mismatch(
+        srv, monitor_files, monkeypatch):
+    """A partial load is legitimate and already warned about. Counting it as a
+    mismatch would refuse the ordinary case of loading one arm at a time."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(sid, {"nmut": {"Monitor1.txt": [1, 16]}})
+    assert res["group_sizes"] == {"nmut": 16}
+    joined = " ".join(res["warnings"])
+    assert "nctrl" in joined and "not assigned any channels" in joined
+
+
+def test_override_requires_both_reason_and_confirm(srv, monitor_files,
+                                                    monkeypatch):
+    """A reason with no confirmation is not a decision; a confirmation with no
+    reason is not a record. Each half alone is refused, and the refusal says
+    which half is missing."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    mapping = {"nmut": {"Monitor1.txt": [1, 16]},
+               "nctrl": {"Monitor1.txt": [17, 32]}}
+
+    with pytest.raises(ToolError) as reason_only:
+        srv.assign_groups(sid, mapping, n_override_reason="83 tubes not loaded")
+    assert "confirm_n_override is not true" in str(reason_only.value)
+
+    with pytest.raises(ToolError) as confirm_only:
+        srv.assign_groups(sid, mapping, confirm_n_override=True)
+    assert "n_override_reason is empty" in str(confirm_only.value)
+
+    with pytest.raises(ToolError) as blank_reason:
+        srv.assign_groups(sid, mapping, n_override_reason="   ",
+                          confirm_n_override=True)
+    assert "n_override_reason is empty" in str(blank_reason.value)
+
+    assert srv.STORE.get(sid).groups == []      # none of the three assigned
+
+
+def test_override_with_both_proceeds_and_surfaces_the_reason(
+        srv, monitor_files, monkeypatch):
+    """Overridable, never silently. The reason reaches the caller in the result,
+    because an override nobody can see is the same as no check."""
+    pytest.importorskip("yaml")
+    _pin(monkeypatch, FIXTURE_N)
+    sid = srv.load_experiment(monitor_files, "x")["session_id"]
+    res = srv.assign_groups(
+        sid,
+        {"nmut": {"Monitor1.txt": [1, 16]},
+         "nctrl": {"Monitor1.txt": [17, 32]}},
+        n_override_reason="83 tubes were never loaded in this run",
+        confirm_n_override=True,
+    )
+    assert res["group_sizes"] == {"nmut": 16, "nctrl": 16}
+    (note,) = [w for w in res["warnings"] if "Declared-n" in w]
+    assert "ACCEPTED by explicit override" in note
+    assert "83 tubes were never loaded" in note
+    assert "99" in note and "16" in note

@@ -282,7 +282,12 @@ def set_analysis_window(
 @mcp.tool(annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=True,
     openWorldHint=False))
-def assign_groups(session_id: str, mapping: dict) -> dict:
+def assign_groups(
+    session_id: str,
+    mapping: dict,
+    n_override_reason: str | None = None,
+    confirm_n_override: bool = False,
+) -> dict:
     """Assign channels to experimental groups. HUMANS ONLY — the model must never
     infer genotype or condition from the data; it only records what the human
     provides.
@@ -303,6 +308,20 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
     list_contrasts for the file in effect); an undeclared label is refused rather
     than accepted as a new group. Assigning only some of the declared groups is
     allowed — a partial load is legitimate — but it is reported as a warning.
+
+    DECLARED-n CHECKSUM. If the declaration writes an integer under a group label
+    (`groups:` mapping form, e.g. `mut: 32`), that is the number of independent
+    animals the design claims for that group, and this tool REFUSES a mapping that
+    produces a different count — naming the group, the declared n and the computed
+    n. Groups with no declared n are not checked, which is every declaration
+    written in the list form. The check runs here, before any exclusion, because
+    this is where n is first asserted rather than derived.
+
+    To proceed anyway — a tube genuinely not loaded is the ordinary case — pass
+    BOTH `n_override_reason` (what happened, recorded in the warnings) and
+    `confirm_n_override=true`. One without the other is refused: a reason with no
+    confirmation is not a decision, and a confirmation with no reason is not a
+    record.
 
     Warns, but does not refuse, if a group's channels all come from a single
     monitor, because that confounds treatment with monitor. Returns the resulting
@@ -359,6 +378,9 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
         sizes[g["labels"]] = sizes.get(g["labels"], 0) + 1
 
     _check_group_labels(set(sizes))             # refuses an undeclared label
+    # Before the save: a refused assignment must not persist, or the next call
+    # sees groups the checksum already rejected.
+    n_notes = _check_declared_n(sizes, n_override_reason, confirm_n_override)
 
     session.groups = groups
     STORE.save(session)
@@ -372,6 +394,7 @@ def assign_groups(session_id: str, mapping: dict) -> dict:
     ]
     warnings = [w for w in (_confound_warning(groups),
                             _unassigned_declared_warning(set(sizes))) if w]
+    warnings += n_notes                          # an accepted declared-n override
     warnings += _declaration_warnings()          # e.g. ignored values under groups:
     return GroupResult(
         session_id=session_id, group_sizes=sizes, unassigned=unassigned,
@@ -815,6 +838,65 @@ def _check_group_labels(assigned: set[str]) -> None:
             "file's groups: key, not from the data — if that is a typo, fix the "
             "mapping; if the group is real, a human adds it to groups: first."
         )
+
+
+def _check_declared_n(sizes: dict[str, int], reason: str | None,
+                      confirm: bool) -> list[str]:
+    """Compare assigned n against the declaration's declared n. Returns the notes
+    to surface when a mismatch was explicitly overridden; raises otherwise.
+
+    Why a checksum and not a fix: the declaration states how many independent
+    animals a group has, and the mapping states which channels carry them. Those
+    are two independent assertions about the same number, and until now nothing
+    compared them — so a mapping that assigned three files' worth of channels to
+    one group reported 3x the animals and nothing objected (HANDOFF-12). This does
+    not model the apparatus and must not start to; it only notices that the two
+    numbers disagree and makes a human say which is right.
+
+    Only groups present in BOTH the declaration and the assignment are compared.
+    A declared group with nothing assigned is a partial load — legitimate, already
+    warned about by _unassigned_declared_warning, and not a mismatch.
+
+    Not best-effort, for the same reason _check_group_labels is not: with no
+    default declaration, an unreadable one means nothing is declared at all, and
+    silently skipping the check would make the strongest case (no declaration in
+    effect) the one where the guard does nothing."""
+    declared = config.declared_n()
+    mismatches = {
+        label: (declared[label], sizes[label])
+        for label in sorted(set(declared) & set(sizes))
+        if declared[label] != sizes[label]
+    }
+    if not mismatches:
+        return []
+
+    detail = "; ".join(
+        f"'{label}' declares n={d} but this mapping assigns {c} channel(s)"
+        for label, (d, c) in mismatches.items()
+    )
+    if not confirm or not (reason and str(reason).strip()):
+        missing = (
+            "pass both n_override_reason (what happened) and "
+            "confirm_n_override=true"
+            if not confirm and not (reason and str(reason).strip())
+            else "confirm_n_override=true is set but n_override_reason is empty"
+            if confirm else
+            "n_override_reason is set but confirm_n_override is not true"
+        )
+        raise ToolError(
+            f"Declared-n mismatch: {detail}. The declaration and the mapping are "
+            "two independent statements of the same number and they disagree, so "
+            "one of them is wrong and guessing which would put a wrong n into "
+            "every downstream mean, SD and test. Fix the mapping if it is the "
+            "mapping; correct the declaration if the design changed. If the count "
+            f"is genuinely right — a tube not loaded, say — {missing}. Nothing was "
+            "assigned."
+        )
+    return [
+        f"Declared-n mismatch ACCEPTED by explicit override: {detail}. Reason "
+        f"given: {str(reason).strip()}. The assignment used the computed count, "
+        "not the declared one; n is what the mapping says."
+    ]
 
 
 def _declaration_warnings() -> list[str]:

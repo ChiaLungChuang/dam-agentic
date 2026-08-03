@@ -102,6 +102,7 @@ def load_config(path: Path | None = None) -> dict:
     data = _read_declaration(path, yaml)
     _check_experiment_matches_filename(data, path)
     groups = _parse_groups(data, path)
+    _parse_declared_n(data, path)          # refuses a non-positive declared n here
 
     contrasts = data.get("contrasts") or []
     if not isinstance(contrasts, list):
@@ -130,14 +131,17 @@ def _parse_groups(data: dict, path: Path) -> set[str]:
     Two shapes are accepted, both unambiguous about the labels themselves:
 
       groups: [mut, ctrl]              a list of labels
-      groups:                          a mapping whose KEYS are the labels;
-        mut:  {Monitor1.txt: [1, 16]}  values are documentary and never read
-        ctrl: {Monitor1.txt: [17, 32]}
+      groups:                          a mapping whose KEYS are the labels
+        mut:  32                       an INTEGER value is the declared n
+        ctrl: {Monitor1.txt: [17, 32]} anything else is documentary, never read
 
     Channel ranges never come from this file — they reach the server through
     assign_groups at call time (CLAUDE.md). A mapping is allowed only because both
     forms already exist in this repo and both name the labels deterministically;
-    this is not a guess about intent."""
+    this is not a guess about intent.
+
+    Labels are all this function returns. An integer value is read separately by
+    `declared_n`, which is the only thing that consumes it."""
     raw = data.get("groups")
     if raw is None:
         declared = sorted({g for c in (data.get("contrasts") or [])
@@ -168,6 +172,59 @@ def _parse_groups(data: dict, path: Path) -> set[str]:
             "Every entry must be a non-empty label, and there must be at least one."
         )
     return clean
+
+
+def _is_declared_n(value) -> bool:
+    """An integer under a groups: key means the declared number of animals.
+
+    bool is excluded deliberately: `mut: true` is an int to Python and is not a
+    count. It falls through to the documentary branch and keeps the warning."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _parse_declared_n(data: dict, path: Path) -> dict[str, int]:
+    """The declared n per group, for the groups that declare one.
+
+    Absent for the list form, and absent per-key for a mapping whose value is not
+    an integer. Absent means "not declared" and is never an error: the list form
+    is the existing convention and stays warning-free.
+
+    A count that cannot be a count is refused rather than carried. Zero or
+    negative would compare against a real assignment and always mismatch, so it
+    would surface as an assign_groups refusal naming the wrong thing — the
+    declaration is where it is wrong, and load is where that is cheapest to say."""
+    raw = data.get("groups")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for label, value in raw.items():
+        if not _is_declared_n(value):
+            continue
+        n = int(value)
+        if n <= 0:
+            raise ToolError(
+                f"{path} declares 'groups: {label}: {n}'. An integer under a group "
+                "label is the declared number of independent animals in that "
+                "group, so it must be positive. To declare no n for this group, "
+                "give it no value (or use the list form of groups:)."
+            )
+        out[str(label).strip()] = n
+    return out
+
+
+def declared_n(path: Path | None = None) -> dict[str, int]:
+    """{label: declared n} for the groups that declare one; {} when none do.
+
+    This is a *checksum*, not a model of the apparatus. It says how many
+    independent animals the design claims for a group, so assign_groups can refuse
+    a mapping that produces a different number. It carries no notion of tubes,
+    beams or topology and must not grow one — HANDOFF-12 records why that
+    distinction needs a design decision, and this is deliberately not it.
+
+    A group with no declared n is unchecked, which is the existing behaviour for
+    every declaration written so far."""
+    path = path or config_path()
+    return _parse_declared_n(load_config(path), path)
 
 
 def _check_contrast_groups_are_declared(c: dict, groups: set[str],
@@ -335,12 +392,18 @@ def declaration_warnings(path: Path | None = None) -> list[str]:
     Currently one: `groups:` written as a mapping carries values that are never
     read. Ignoring them silently is the same shape as the phase fallback this repo
     already found — an input that looks like it does something and does not.
-    Someone will write channel ranges there and assume they applied."""
+    Someone will write channel ranges there and assume they applied.
+
+    An INTEGER value is exempt, because it is now read: it is the declared n and
+    assign_groups checks against it. Only the values that are still ignored are
+    still warned about, or the warning would be telling the reader that a check
+    they can watch fire did nothing."""
     data = load_config(path)
     raw = data.get("groups")
     if not isinstance(raw, dict):
         return []
-    with_values = sorted(k for k, v in raw.items() if v not in (None, {}, [], ""))
+    with_values = sorted(k for k, v in raw.items()
+                         if v not in (None, {}, [], "") and not _is_declared_n(v))
     if not with_values:
         return []
     return [
