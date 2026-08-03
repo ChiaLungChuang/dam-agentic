@@ -236,6 +236,16 @@ silent-corruption incident here — the output looked plausible, so nothing
 flagged it, and the corruption was in the permanent record rather than in a
 value some check would catch. Write the message to a file and pass it.
 
+**Compare two branches against their own merge-base, never against current
+`main`.** Checking that two PRs touch disjoint files with
+`comm -12` on `git diff --name-only main..branch` is wrong the moment either
+branch was cut before the other merged: everything the newer `main` gained shows
+up as a *reversion* in the older branch's diff, and files neither PR touches
+appear in the intersection. This produced a false overlap on `dam_mcp/audit.py`
+between PRs #15 and #16, which touch one file each and share none. Use
+`git merge-base main <branch>` per branch and diff from there. Same family as the
+rules above: a check that runs, produces output, and is wrong.
+
 **An unpinned major is a claim about a version, not about the code. Check the cap
 when a dependency is added.** This shape has now happened twice: `ruff>=0.6`
 resolved to 0.16.0 and reported 57 findings on unchanged code; `mcp>=1.0` resolved

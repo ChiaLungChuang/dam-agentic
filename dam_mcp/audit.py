@@ -38,6 +38,13 @@ Each record carries:
                       confirmed anyway. A field rather than a fourth outcome, and
                       carried on every call on that session rather than only on the
                       assign_groups that created it — see AuditRecord.
+  * ``override_accepted_here`` — the *event* form of the same fact, true on
+                      exactly the one call that accepted the override. **This is
+                      the field to sum when counting overrides**; ``n_overrides``
+                      is a state and counting it counts calls, not decisions.
+                      Three-valued: ``None`` means the record predates the field
+                      or the session was unreadable, and must not be read as
+                      ``False``.
   * ``error``       — the model-facing message when outcome != ok.
   * ``duration_ms`` — wall-clock cost of the dispatch.
 
@@ -138,21 +145,41 @@ class AuditRecord:
     # produces the numbers is the line a reader will have in front of them, and it
     # is the one that most needs to say the n rests on a suppressed refusal.
     #
-    # The consequence for anyone reading the stream: COUNTING lines with a
-    # non-empty n_overrides counts *calls made on overridden sessions*, not
-    # overrides. One override on a session with twenty subsequent calls appears
-    # twenty-one times. To count overrides, group by session_id first, or filter
-    # to tool == "assign_groups". Stated here because the field name reads like an
-    # event and the value is a state, and that is exactly the misreading a
-    # grep-and-wc would produce.
+    # COUNTING lines with a non-empty n_overrides counts *calls made on overridden
+    # sessions*, not overrides: one override on a session with twenty subsequent
+    # calls appears twenty-one times. That hazard is why the companion field below
+    # exists. A comment could only warn about it; a field lets the stream answer
+    # the question directly, and an inflated count of an action is the mirror image
+    # of the defect class this repo exists to remove.
     n_overrides: list[dict] = field(default_factory=list)
+    # THE COUNTING FIELD. Sum this to answer "how many overrides were accepted";
+    # read n_overrides above to answer "does this call's number rest on a
+    # suppressed refusal". The two are deliberately spelled as differently as an
+    # additive change allows — one leads with `n_`, is a list, and is a *state*
+    # carried by every call on the session; the other leads with `override_`, is a
+    # scalar, and is an *event* true on exactly one call.
+    #
+    # THREE-VALUED, and None is load-bearing. Audit files written before this
+    # field exists have no key at all, and defaulting the absent case to False
+    # would state "this call did not accept an override" about a record that never
+    # recorded either way — a claim the data does not support. So:
+    #     True   this call accepted a declared-n override
+    #     False  this call did not, and that was recorded
+    #     None   unknown: the record predates the field, or the session could not
+    #            be read at dispatch time
+    # A reader must therefore treat a missing key as None, never as False. Summing
+    # truthiness is safe for both (None is falsey); *counting negatives* is what
+    # needs the distinction, and that is the direction that would otherwise
+    # silently over-report clean calls.
+    override_accepted_here: bool | None = None
 
     @classmethod
     def now(cls, *, principal: str, tool: str, session_id: str | None,
             params: dict, data_files: list[str], outcome: str,
             error: str | None = None, duration_ms: float = 0.0,
             run_id: str = DEFAULT_RUN_ID,
-            n_overrides: list[dict] | None = None) -> AuditRecord:
+            n_overrides: list[dict] | None = None,
+            override_accepted_here: bool | None = None) -> AuditRecord:
         if outcome not in OUTCOMES:
             raise ValueError(f"outcome must be one of {OUTCOMES}, got {outcome!r}")
         return cls(
@@ -161,6 +188,7 @@ class AuditRecord:
             data_files=list(data_files),
             outcome=outcome, error=error, duration_ms=duration_ms,
             n_overrides=list(n_overrides or []),
+            override_accepted_here=override_accepted_here,
         )
 
     def to_json(self) -> str:

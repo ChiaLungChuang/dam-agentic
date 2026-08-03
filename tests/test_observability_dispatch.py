@@ -317,3 +317,92 @@ async def test_a_session_without_the_field_does_not_break_the_audit_line(tmp_pat
     await mcp.call_tool("t", {"session_id": "dam-1"})
     (rec,) = audit.read_audit(log_path)
     assert rec["outcome"] == "ok" and rec["n_overrides"] == []
+
+
+# ── the counting field, through the chokepoint ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_only_the_assign_groups_call_is_marked_as_accepting(tmp_path):
+    """The whole point: three calls on one overridden session, one decision. The
+    state field says all three rest on it; the event field says which one made it."""
+    mcp = FastMCP("acc")
+
+    @mcp.tool()
+    def assign_groups(session_id: str) -> dict:
+        return {"session_id": session_id}
+
+    @mcp.tool()
+    def compute_sleep(session_id: str) -> dict:
+        return {"session_id": session_id}
+
+    log_path = tmp_path / "audit.jsonl"
+    observability.instrument_tool_dispatch(
+        mcp, store_provider=lambda: _FakeStore({"dam-1": _OverriddenSession()}),
+        audit_log=audit.AuditLog(log_path))
+    await mcp.call_tool("assign_groups", {"session_id": "dam-1"})
+    await mcp.call_tool("compute_sleep", {"session_id": "dam-1"})
+    await mcp.call_tool("compute_sleep", {"session_id": "dam-1"})
+
+    recs = audit.read_audit(log_path)
+    assert [r["override_accepted_here"] for r in recs] == [True, False, False]
+    assert sum(1 for r in recs if r["n_overrides"]) == 3     # calls on the session
+    assert sum(1 for r in recs if r["override_accepted_here"]) == 1   # decisions
+
+
+@pytest.mark.asyncio
+async def test_a_clean_assign_groups_did_not_accept_anything(tmp_path):
+    """Negative control. A session with no overrides must record False, not True —
+    otherwise the field would count every assignment as a decision."""
+    mcp = FastMCP("clean")
+
+    @mcp.tool()
+    def assign_groups(session_id: str) -> dict:
+        return {"session_id": session_id}
+
+    log_path = tmp_path / "audit.jsonl"
+    observability.instrument_tool_dispatch(
+        mcp, store_provider=lambda: _FakeStore({"dam-1": _FakeSession(["/a.txt"])}),
+        audit_log=audit.AuditLog(log_path))
+    await mcp.call_tool("assign_groups", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["override_accepted_here"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_refused_assign_groups_accepted_nothing(tmp_path):
+    """A refusal assigned nothing, so it accepted nothing. False, not None — this
+    is known, not unknown."""
+    mcp = FastMCP("refuse")
+
+    @mcp.tool()
+    def assign_groups(session_id: str) -> dict:
+        raise ToolError("Declared-n mismatch: ... Nothing was assigned.")
+
+    log_path = tmp_path / "audit.jsonl"
+    observability.instrument_tool_dispatch(
+        mcp, store_provider=lambda: _FakeStore({"dam-1": _OverriddenSession()}),
+        audit_log=audit.AuditLog(log_path))
+    with pytest.raises(Exception):
+        await mcp.call_tool("assign_groups", {"session_id": "dam-1"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["outcome"] == "refused"
+    assert rec["override_accepted_here"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_session_is_unknown_not_false(tmp_path):
+    """None where it genuinely cannot be determined. Recording False here would
+    claim the call accepted nothing, which the dispatch does not know."""
+    mcp = FastMCP("unknown")
+
+    @mcp.tool()
+    def assign_groups(session_id: str) -> dict:
+        return {"session_id": session_id}
+
+    log_path = tmp_path / "audit.jsonl"
+    observability.instrument_tool_dispatch(
+        mcp, store_provider=lambda: _FakeStore({}),      # session not present
+        audit_log=audit.AuditLog(log_path))
+    await mcp.call_tool("assign_groups", {"session_id": "dam-missing"})
+    (rec,) = audit.read_audit(log_path)
+    assert rec["override_accepted_here"] is None
