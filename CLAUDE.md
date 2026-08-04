@@ -236,6 +236,45 @@ silent-corruption incident here — the output looked plausible, so nothing
 flagged it, and the corruption was in the permanent record rather than in a
 value some check would catch. Write the message to a file and pass it.
 
+**Whenever you compare two things, name the base — and check you are on it.**
+This family has bitten three times in one round, always one step short of a
+published wrong claim, and always caught by checking rather than by noticing:
+
+* `comm -12` on `git diff --name-only main..branch` for two PRs, which nearly
+  reported `dam_mcp/audit.py` as shared between two PRs that touch one file each.
+* A container collection count of 308 set against CI's 316 — **branch head versus
+  merge ref.** CI tests the PR merged into current `main`; a local run tests the
+  branch alone. They differ by whatever `main` gained in between (here, eight
+  tests from a sibling PR).
+* `git checkout main` landing on a **stale local `main`** and collecting 208,
+  which was nearly reported as the finding.
+
+One shape: *the reference compared against was not the reference intended.* The
+mechanical fixes, which are checkable in the moment:
+
+* State the base in the comparison itself; a diff without a named base is not a
+  result.
+* **`git fetch` does not move local `main`.** Check out `origin/main`, or print
+  the sha after checkout and confirm it.
+* Reproducing CI locally means merging `main` into the branch first, or accepting
+  that the counts will differ and saying which base each figure came from.
+* A `cmd_a || cmd_b` fallback that never fires because `cmd_a` *succeeded
+  wrongly* is a guard that exists and is not exercised — the same family as the
+  rule below, at the shell level. Prefer the unconditional form.
+
+**Never report a number you did not read, and never fill a figure whose run has
+not finished.** Two mechanisms, both of which have produced a wrong published
+number here:
+
+* **The fetch did not contain it.** `get_job_logs` with `tail_lines=4` does not
+  reach pytest's `====== N passed ... ======` line. If the fetch came back
+  without that line, refetch with more lines; do not supply the number from
+  memory or from a sibling job. Three occurrences, one cause.
+* **The figure came from the wrong run.** CI's `316 / 0` was written into a PR
+  body while the container run was still going. If a run has not completed, write
+  **pending** and report it when it lands. A figure in the wrong environment's
+  slot is not a typo; it is an unmeasured claim.
+
 **Compare two branches against their own merge-base, never against current
 `main`.** Checking that two PRs touch disjoint files with
 `comm -12` on `git diff --name-only main..branch` is wrong the moment either
