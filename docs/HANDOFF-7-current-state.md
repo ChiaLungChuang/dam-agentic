@@ -393,16 +393,37 @@ mortality, or real per-monitor clocks.
   did not introduce this; issue #1 revealed it, and nothing else would have — a
   vacuous pass is indistinguishable from a real one until not-applicable exists as
   a value. Closed in the issue #1 PR by pinning the applicable set exactly.
-- **H18-2 (open) — most rails have no END-TO-END positive control.** Audited across
-  the suite. At the unit level all seven structural rails have a positive control
-  in `tests/test_properties.py`, on hand-built traces. At the **end-to-end** level
-  — driving the real stdio server through `ScriptedModel` — only three of seven do
-  (`load_first`, `qc_before_metrics`, `groups_before_metrics`), which is exactly
-  what H18-1 exposed. `answer_grounded` has **no positive control at any level**:
-  its only test is the negative one at `test_fake_agent.py:103`. A rail that always
-  failed end-to-end, or one whose real-server behaviour diverges from the
-  hand-built trace, could go unnoticed. Negative controls prove a rail fires; they
-  do not prove it passes when it should.
+- **H18-2 (open) — `answer_grounded` has never been observed to pass, anywhere.**
+  This is the rail closest to the project's central claim — that a number in an
+  answer traces to tool output rather than being invented — and three independent
+  checks all come back empty:
+
+  1. **No positive control at any level.** Its only test is the negative one
+     (`tests/test_fake_agent.py:103`, a fabricated `88888`), which proves the rail
+     *fires*. Nothing proves it *passes* on a correctly grounded answer.
+  2. **It was never scored in the Phase 0 eval.** It appears **zero times** in
+     `docs/phase0-eval-report.md`. It is in `HEURISTIC`, and `aggregate` reports
+     only `STRUCTURAL`, so no eval run has ever produced a figure for it.
+  3. **Its one end-to-end assertion is now pinned `is None`** (issue #1). That
+     documents the absence honestly; it does not fill it.
+
+  So a rail that always failed, or one broken by a refactor, would be caught by
+  nothing. **A negative control proves a rail fires; it does not prove the rail
+  passes when it should**, and for this rail nothing does. Note also that issue
+  #1's change to it moves no reported number, because no reported number includes
+  it — which is its own statement about how much of this rail is wired up.
+
+  Closing it needs a positive control that states a number *taken from a tool
+  result* and asserts `answer_grounded(tr).passed is True`, end-to-end, plus a
+  decision about whether `HEURISTIC` properties should be reported at all.
+
+  **The wider audit, which is the lesser finding.** At the unit level all seven
+  `STRUCTURAL` rails have a positive control in `tests/test_properties.py`, on
+  hand-built traces. At the **end-to-end** level — driving the real stdio server —
+  only three of seven do (`load_first`, `qc_before_metrics`,
+  `groups_before_metrics`), which is what H18-1 exposed. Read alone, "seven of
+  seven at unit level" sounds like adequate coverage; the two gaps above are the
+  finding.
 - **H18-3 (open) — the CI `eval` job does not exercise `evals/scoring.py`.** Found
   while ruling the job out as the casualty of issue #1's red run. It runs
   `damsim/generate.py` + `damsim/score.py`, which grade the **corpus defect
