@@ -393,36 +393,52 @@ mortality, or real per-monitor clocks.
   did not introduce this; issue #1 revealed it, and nothing else would have — a
   vacuous pass is indistinguishable from a real one until not-applicable exists as
   a value. Closed in the issue #1 PR by pinning the applicable set exactly.
-- **H18-2 (open) — `answer_grounded` has never been observed to pass, anywhere.**
+- **H18-2 (open) — `answer_grounded` has never been observed to pass, anywhere,
+  and the reason it is unscored is invisible to a reader.**
   This is the rail closest to the project's central claim — that a number in an
-  answer traces to tool output rather than being invented — and three independent
-  checks all come back empty:
+  answer traces to tool output rather than being invented. Three independent
+  checks come back empty:
 
   1. **No positive control at any level.** Its only test is the negative one
      (`tests/test_fake_agent.py:103`, a fabricated `88888`), which proves the rail
      *fires*. Nothing proves it *passes* on a correctly grounded answer.
-  2. **It was never scored in the Phase 0 eval.** It appears **zero times** in
-     `docs/phase0-eval-report.md`. It is in `HEURISTIC`, and `aggregate` reports
-     only `STRUCTURAL`, so no eval run has ever produced a figure for it.
-  3. **Its one end-to-end assertion is now pinned `is None`** (issue #1). That
-     documents the absence honestly; it does not fill it.
+  2. **It has never been scored.** It appears **zero times** in
+     `docs/phase0-eval-report.md`: it is in `HEURISTIC`, and `aggregate` reports
+     only `STRUCTURAL`.
+  3. **Its one end-to-end assertion is now pinned `is None`** (issue #1), which
+     documents the absence honestly and does not fill it.
 
-  So a rail that always failed, or one broken by a refactor, would be caught by
-  nothing. **A negative control proves a rail fires; it does not prove the rail
-  passes when it should**, and for this rail nothing does. Note also that issue
-  #1's change to it moves no reported number, because no reported number includes
-  it — which is its own statement about how much of this rail is wired up.
+  **The exclusion is deliberate — checked, not assumed.** It is stated in three
+  places: the property's own docstring (*"Advisory — a number can legitimately be
+  prose (a threshold), so treat a failure as a flag to inspect, not a hard
+  verdict"*), the section header in `properties.py` (*"heuristic; not part of the
+  strict structural set"*), and `evals/README.md`, which lists it apart from the
+  rails. `evaluate()` defaulting to `STRUCTURAL` is the mechanism, not an
+  oversight.
 
-  Closing it needs a positive control that states a number *taken from a tool
-  result* and asserts `answer_grounded(tr).passed is True`, end-to-end, plus a
-  decision about whether `HEURISTIC` properties should be reported at all.
+  **So the finding is not that a rail was forgotten — it is that the exclusion
+  leaves no trace in the output.** A reader of `phase0-eval-report.md` sees seven
+  rails and has no way to learn that an eighth exists and was withheld. Nothing in
+  `format_report` names an excluded property; the list it prints is simply the
+  scored one.
+
+  **The fix is a line in the report naming the excluded rail and why — not scoring
+  it.** Publishing a number from a check whose own docstring says it must not be
+  read as a verdict would invert everything else in this round; it is the same
+  reasoning that made `is None` better than deleting the assertion. What is owed
+  is disclosure, not a figure.
+
+  Closing it therefore needs two things, and only the first is about scoring:
+  a positive control that states a number *taken from a tool result* and asserts
+  `passed is True` end-to-end, and a line in `format_report` naming `HEURISTIC`
+  properties as evaluated-but-not-aggregated, with the reason.
 
   **The wider audit, which is the lesser finding.** At the unit level all seven
   `STRUCTURAL` rails have a positive control in `tests/test_properties.py`, on
   hand-built traces. At the **end-to-end** level — driving the real stdio server —
   only three of seven do (`load_first`, `qc_before_metrics`,
   `groups_before_metrics`), which is what H18-1 exposed. Read alone, "seven of
-  seven at unit level" sounds like adequate coverage; the two gaps above are the
+  seven at unit level" sounds like adequate coverage; the gaps above are the
   finding.
 - **H18-3 (open) — the CI `eval` job does not exercise `evals/scoring.py`.** Found
   while ruling the job out as the casualty of issue #1's red run. It runs
