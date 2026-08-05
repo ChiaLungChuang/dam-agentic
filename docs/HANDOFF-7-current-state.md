@@ -325,11 +325,11 @@ mortality, or real per-monitor clocks.
   H11-3). **Settle before any sleep number leaves this system.**
 - **H12-1 — three monitor files are three beams on one population, and nothing in
   the system can say so.** Each apparatus is 32 tubes through three stacked
-  detector boards; `Monitor1/2/3` are three IR beams at three heights on the *same
+  detector boards; `Monitor1/2/3` are three IR beams at three positions along the *same
   32 flies*. So session `dam-7010fc5ebdc9` is 128 animals, not 384, and 32 per
   group, not 96 — every group mean, SD and n from that run is affected, and
   per-beam death detection is invalid because trailing zeros mean the fly stopped
-  visiting that height. Explains the 0-empty result and answers H11-7. No input
+  visiting that region of the tube. Explains the 0-empty result and answers H11-7. No input
   anywhere — `load_experiment`, `assign_groups`, or the declaration — carries the
   apparatus↔beam relationship, so three racks and three beams are accepted
   identically and in silence. **Upstream of every H11 item that touches n or

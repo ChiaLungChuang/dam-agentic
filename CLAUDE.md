@@ -256,8 +256,13 @@ mechanical fixes, which are checkable in the moment:
   result.
 * **`git fetch` does not move local `main`.** Check out `origin/main`, or print
   the sha after checkout and confirm it.
-* Reproducing CI locally means merging `main` into the branch first, or accepting
-  that the counts will differ and saying which base each figure came from.
+* **Two bases exist and differ silently: CI tests the MERGE REF — the PR head
+  merged into current `main` — while a local run tests the BRANCH HEAD alone.**
+  They diverge by whatever `main` gained after the branch was cut, and neither
+  environment says which it used. This produced the worst instance: 308 against
+  316, eight tests apart, and the eight were a sibling PR's. Reproducing CI
+  locally means merging `main` into the branch first, or accepting the difference
+  and saying which base each figure came from.
 * A `cmd_a || cmd_b` fallback that never fires because `cmd_a` *succeeded
   wrongly* is a guard that exists and is not exercised — the same family as the
   rule below, at the shell level. Prefer the unconditional form.
