@@ -12,12 +12,13 @@ the run found anything.
 >
 > Every finding in this document was computed **per beam**. On this rig that is not
 > the same as per animal: Monitor1, Monitor2 and Monitor3 are three IR beams at
-> three heights on one apparatus of 32 tubes, watching the **same 32 flies**. So
+> three positions along one apparatus of 32 tubes, watching the **same 32 flies**. So
 > the 384 channels of this session are 128 animals, not 384, and the four groups
 > are 32 animals each, not 96.
 >
 > **Per-beam death detection and per-beam window analysis are not valid for this
-> rig.** Trailing zeros on one beam mean the fly stopped visiting that height, not
+> rig.** Trailing zeros on one beam mean the fly stopped visiting that region of
+> the tube, not
 > that it died — which is upstream of Findings 1, 2, 5 and 6, and of the exclusion
 > record they are read from. Question 7 is answered by the same fact and is closed
 > below.
@@ -247,7 +248,7 @@ assigns groups *by* channel range.
 > **ANSWERED — see `HANDOFF-12-monitor-topology.md`.** The second reading was
 > right in substance and understated in degree. It is not a hardware, wiring or
 > position effect at a shared channel index: Monitor1, Monitor2 and Monitor3 are
-> three IR beams at three heights on the **same 32 tubes and the same 32 flies**.
+> three IR beams at three positions along the **same 32 tubes and the same 32 flies**.
 > Channel index is not a confounder shared across monitors — it is the *same
 > animal*, seen three times. One fly breaking three beams explains the aligned
 > last-movement times, the ±1 bin differences, and the suspect flags landing on

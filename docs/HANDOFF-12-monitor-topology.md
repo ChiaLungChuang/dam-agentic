@@ -11,10 +11,10 @@ the feature this implies needs a design decision that has not been made.
 
 ## The finding in one paragraph
 
-Each apparatus is **one rack of 32 vertical glass tubes passing through three
+Each apparatus is **one rack of 32 horizontal plastic tubes passing through three
 stacked detector boards**. `Monitor1`, `Monitor2` and `Monitor3` are not three
 experiments, three racks, or three populations. They are **three IR beams at three
-heights on the same 32 tubes, watching the same 32 flies** — the plug / middle /
+positions along the same 32 tubes, watching the same 32 flies** — the plug / middle /
 food arrangement used for position tracking. Confirmed from photographs of the
 apparatus. Every layer of this system — the loader, the grouping tool, the QC
 detector, the metrics, the contrast machinery — treats a monitor file as an
@@ -43,10 +43,10 @@ reason this did not reach a p-value.
 
 ### 2. Per-beam death detection is invalid on this rig
 
-A channel's trailing zeros mean **the fly stopped visiting that height**, not that
-it died. A fly that settles at the food and stops climbing goes silent on the plug
-beam while remaining alive and visible on another. The death rule reads that as
-mortality.
+A channel's trailing zeros mean **the fly stopped visiting that region of the
+tube**, not that it died. A fly that settles at the food end and stops traversing
+the tube goes silent on the plug beam while remaining alive and visible on
+another. The death rule reads that as mortality.
 
 This is upstream of HANDOFF-11's Findings 1, 2, 5 and 6, and of the exclusion
 record they are read from — all four were computed per beam. HANDOFF-11's Finding 2
@@ -73,7 +73,7 @@ closed by this document, and it did not need the second experiment it asked for.
 
 ## Evidence chain
 
-1. **Photographs of the apparatus** show 32 vertical tubes passing through three
+1. **Photographs of the apparatus** show 32 horizontal tubes passing through three
    stacked detector boards — the plug / middle / food arrangement. This is the
    primary evidence and it is external to the data.
 2. **Channel indices repeat across monitors, to the minute.** Monitor2 ch10 and
@@ -123,9 +123,9 @@ context that makes it interpretable — and it is the largest instance found so 
 * **No re-analysis was run.** The corrected n has not been pushed through
   `compute_sleep` or any contrast; nothing here reports what the numbers would
   become. The 3× claim is arithmetic on the design, not a measured result.
-* **The beam-to-height mapping is not verified per file.** That Monitor1/2/3 are
+* **The beam-to-position mapping is not verified per file.** That Monitor1/2/3 are
   plug/middle/food *in that order* is the stated arrangement; which file is which
-  height has not been confirmed from the data, and nothing here depends on it.
+  position has not been confirmed from the data, and nothing here depends on it.
 * **Whether every block of three in this session follows the same pattern** is
   inferred from 12 = 4 × 3 and from the paired last-movement times in two blocks.
   It has not been checked for all four blocks.

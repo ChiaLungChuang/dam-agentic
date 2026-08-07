@@ -325,11 +325,11 @@ mortality, or real per-monitor clocks.
   H11-3). **Settle before any sleep number leaves this system.**
 - **H12-1 — three monitor files are three beams on one population, and nothing in
   the system can say so.** Each apparatus is 32 tubes through three stacked
-  detector boards; `Monitor1/2/3` are three IR beams at three heights on the *same
+  detector boards; `Monitor1/2/3` are three IR beams at three positions along the *same
   32 flies*. So session `dam-7010fc5ebdc9` is 128 animals, not 384, and 32 per
   group, not 96 — every group mean, SD and n from that run is affected, and
   per-beam death detection is invalid because trailing zeros mean the fly stopped
-  visiting that height. Explains the 0-empty result and answers H11-7. No input
+  visiting that region of the tube. Explains the 0-empty result and answers H11-7. No input
   anywhere — `load_experiment`, `assign_groups`, or the declaration — carries the
   apparatus↔beam relationship, so three racks and three beams are accepted
   identically and in silence. **Upstream of every H11 item that touches n or
@@ -440,6 +440,33 @@ mortality, or real per-monitor clocks.
   `groups_before_metrics`), which is what H18-1 exposed. Read alone, "seven of
   seven at unit level" sounds like adequate coverage; the gaps above are the
   finding.
+- **H18-4 (open) — the audit stream has never persisted. Every audit record this
+  project has written is gone.** `resolve_audit_path()` defaults to
+  `<state_dir>/audit.jsonl`, and `_state_dir()` defaults to
+  `~/.dam_mcp/sessions` — **outside the repo**, in a home directory that dies with
+  a cloud container. Verified rather than reasoned: the resolved default is
+  `/root/.dam_mcp/sessions/audit.jsonl`, `exists() == False`. CI sets neither
+  `DAM_MCP_AUDIT_LOG` nor `DAM_MCP_STATE_DIR`, no document instructs anyone to set
+  them, and `.gitignore` carries `sessions/`, so the obvious repo-relative
+  override would be silently swallowed too.
+
+  **The scale is the point.** PRs #14 and #17 were *entirely* about getting the
+  declared-n override into the audit record — a session field, a schema field, a
+  dispatch hook, an event field with three-valued back-compatibility, and about
+  twenty tests. All of it writes to a file that no longer exists. Phase 2's whole
+  instrumentation pass is in the same position.
+
+  **Family one, and probably its oldest instance: machinery that exists and is
+  never retained.** H13-2 was expressible-but-unrun; issue #1 was
+  run-but-vacuous; H18-3 is a layer with no CI surface; this is a stream that is
+  written correctly, tested thoroughly, and discarded. It is the instance with the
+  most work layered on top of it, which is exactly why it went unnoticed — every
+  round verified that the record was *written*, and none asked whether it was
+  *kept*.
+
+  Surfaced while checking a precondition for issue #2, which depends on it: a
+  trace that references audit lines by id references something guaranteed absent.
+
 - **H18-3 (open) — the CI `eval` job does not exercise `evals/scoring.py`.** Found
   while ruling the job out as the casualty of issue #1's red run. It runs
   `damsim/generate.py` + `damsim/score.py`, which grade the **corpus defect

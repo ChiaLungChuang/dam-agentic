@@ -14,14 +14,14 @@ re-deriving the question.
 
 ## What the rig is
 
-One **machine** is a rack of 32 vertical glass tubes passing through **three
+One **machine** is a rack of 32 horizontal plastic tubes passing through **three
 stacked detector boards**. Three monitor files per machine are three IR beams at
-three heights on the same 32 tubes and the same 32 flies. The 20251229 dataset is
+three positions along the same 32 tubes and the same 32 flies. The 20251229 dataset is
 **four machines × three monitors = twelve files, 384 channels, 128 animals**.
 
 `load_experiment` and `assign_groups` have no concept of this. So n inflates
 threefold, and per-beam death detection is invalid: trailing zeros on one beam
-mean the fly stopped visiting that height, not that it died.
+mean the fly stopped visiting that region of the tube, not that it died.
 
 **The gap this closes is not "we cannot detect beams."** It is that *no input
 anywhere carries the relationship between files* — so three racks and three beams
@@ -259,7 +259,7 @@ the rig. Three arguments for roles:
 2. **The reference implementation names them**, and a Python layer whose vocabulary
    diverges from the R stage-1 reader's makes every cross-check a translation.
 3. **Downstream analysis needs the role, not the position.** Position and zone
-   inference — dam-shiny's stage 2 — is *about* which height, so an index would be
+   inference — dam-shiny's stage 2 — is *about* which position, so an index would be
    renamed to a role the moment that work started.
 
 **Argument 1 is not hypothetical, and this document is the instance.** The example
@@ -297,6 +297,20 @@ should be labels the loader validates, not switches the maths reads.
 boundary. Retain per-beam data on disk, which costs nothing because it is never
 copied.**
 
+**The order, stated once and explicitly, because it has been described several
+times and appears nowhere in this document:**
+
+> Sum the three monitors of a machine first. Run QC and death detection on the
+> summed signal. Remove all dead animals. Only then does analysis proceed — either
+> on the three monitors together, or on them separately with the position
+> labelled.
+
+**Why the summing must come first is sharper than "per-beam death detection is
+invalid".** It does not produce an invalid result; **it produces a contradictory
+one.** The same animal reads dead at the plug end and alive at the centre and food
+end. There is no way to reconcile three verdicts about one fly at the point they
+are made, and nothing downstream is told there was a disagreement.
+
 Where, concretely:
 
 * `load_experiment` reads `machines:` and records, per session, which files form
@@ -324,6 +338,19 @@ position inference and dam-agentic should not foreclose that. What it must not d
 is expose per-beam counts through a tool return; a future `compute_position` would
 return a summary and a handle like everything else.
 
+**An exclusion set computed on summed data ports back to per-beam data directly,
+and no linkage mechanism is needed.** An earlier version of this reasoning said the
+opposite — that a summed-data exclusion set has nothing to flow back to. That was
+wrong, and it is corrected here so it does not propagate. The exclusion is a list
+of **dead channel indices**, and all three monitors of a machine share the same 32
+tube indices, so tube 7 is tube 7 on all three files. Nothing has to be built to
+connect them.
+
+What a pre-summing approach actually lacks is different, and smaller: **the record
+of which three files became which machine.** That is *provenance*, not coupling —
+the same unrecorded-fact problem this whole document is about, not a data-linkage
+problem. Do not build a linkage mechanism for the exclusions.
+
 **Whatever retains per-beam data must retain the ROLE, not the file order.** This
 is not a detail. An ordering convention that lives in how someone happened to
 upload or sort the files is precisely the class of unrecorded fact this whole
@@ -335,7 +362,7 @@ three is the same defect wearing a different name. The mirrored-order error in
 nothing records it.
 
 **One consequence to accept explicitly.** Summing changes what "zero" means. A
-summed channel reads zero only when the fly crossed no beam at any height, which
+summed channel reads zero only when the fly crossed no beam at any position, which
 is a *stronger* death signal than any single beam — so it does not merely fix the
 inflated n, it makes the death rule mean what it was always documented to mean.
 It does not, however, fix HANDOFF-11's Finding 2: `death_hours=12` against a 12:12
@@ -377,8 +404,16 @@ independence**. That is consistent with the first beam being the food end, where
 flies aggregate. So **a declared role order that runs against the activity
 gradient is worth flagging.**
 
-**Stated as a candidate, not a settled rule.** A detector-sensitivity gradient
-down the stack would produce the same pattern, and that has never been ruled out.
+**The tube geometry removes one rival explanation and leaves one standing.** With
+**horizontal** tubes there is no gravity axis, so negative geotaxis — which a
+reader could otherwise invoke against a vertical rack — cannot account for the
+gradient at all. It never applied here. **Food proximity is the only behavioural
+account left**, which is what makes the gradient evidence for the first board
+being the food end rather than merely consistent with it.
+
+**Stated as a candidate all the same, because one confound survives.** A
+detector-sensitivity gradient across the three boards would produce the identical
+pattern, and that has never been ruled out.
 Board-to-board sensitivity differences are a mundane hardware fact and nothing
 here distinguishes them from a genuine behavioural gradient. Ruling it out would
 need something like a swap test — the same flies recorded with the boards
@@ -409,6 +444,20 @@ Two things it must not become:
   situation.
 * A threshold that silently reclassifies. It produces a `decisions_required`
   entry with the numbers attached, never a changed n and never a reordered role.
+
+**A third candidate, evaluated and demoted.** On a real multi-beam rig, per-beam
+death calls would **concentrate on the plug-end board** while the same channels
+read alive on the food-end board. On genuinely independent racks, death is
+independent across channels, so a *directional* pattern across boards has no
+innocent explanation — which is what makes it look like a strong signal.
+
+**It is not an independent one.** A less sensitive third board produces exactly
+the same signature: fewer counts, more trailing zeros, more death calls, all
+concentrated on that board. That is the same confound as the activity gradient,
+and the directional death pattern is the activity gradient in sharper form rather
+than a new observation. It should be reported as an aspect of that check, not as a
+second line of evidence — two derived views of one measurement quoted separately
+would overstate the case exactly as pseudoreplication does.
 
 Summary of what the cross-check watches, both candidates:
 
