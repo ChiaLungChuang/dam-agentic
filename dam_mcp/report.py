@@ -141,19 +141,55 @@ def render_report(session: Session) -> str:
     return "\n".join(parts)
 
 
+# Columns that lead a metric table, in this order, when present: identity first,
+# then the statistics a reader looks for. An ORDER, not a filter. This used to be
+# the filter — six names, everything else dropped — and the report silently lost
+# survival's values (`y`), the whole log-rank table, the rhythmic fraction and
+# every IQR, while the metrics resource carried all of them.
+_LEADING_COLUMNS = ("labels", "x", "group1", "group2", "n",
+                    "mean", "sd", "sem", "median", "q1", "q3")
+
+
 def _render_metric(payload: dict) -> str:
-    lines = []
-    for key, rows in payload.items():
-        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+    """Every key in the payload, so the document shows what the metric carries.
+
+    Scalars are the computation's parameters (immobility_minutes, method,
+    death_hours) and come first: a number is not interpretable without the
+    threshold that defined it. Lists of rows are tables; lists of strings are
+    decisions; an empty list says so rather than vanishing, because a missing
+    decisions list and an empty one must not read the same."""
+    params, blocks = [], []
+    for key, value in payload.items():
+        if not isinstance(value, list):
+            params.append(f"- {key}: {_fmt(value)}")
             continue
-        lines.append(f"**{key}**")
-        cols = [c for c in ("labels", "x", "n", "mean", "sd", "median") if c in rows[0]]
-        lines.append("| " + " | ".join(cols) + " |")
-        lines.append("|" + "|".join(["---"] * len(cols)) + "|")
-        for r in rows:
-            lines.append("| " + " | ".join(_fmt(r.get(c)) for c in cols) + " |")
-        lines.append("")
-    return "\n".join(lines) if lines else "_(summary)_"
+        blocks.append(f"**{key}**")
+        if not value:
+            blocks.append("_none_")
+        elif all(isinstance(r, dict) for r in value):
+            blocks.extend(_render_table(value))
+        else:
+            blocks.extend(f"- {item}" for item in value)
+        blocks.append("")
+    lines = params + ([""] if params and blocks else []) + blocks
+    return "\n".join(lines) if lines else "_(empty)_"
+
+
+def _render_table(rows: list[dict]) -> list[str]:
+    """Every column with a value in at least one row. A column null in every row
+    (the engine's id / order / channel / monitor) hides nothing by being left out,
+    and rendering it would bury the column that does carry the value."""
+    seen: list[str] = []
+    for r in rows:
+        seen.extend(k for k in r if k not in seen)
+    present = [k for k in seen if any(r.get(k) is not None for r in rows)]
+    if not present:
+        return ["_no values_"]
+    cols = ([c for c in _LEADING_COLUMNS if c in present]
+            + [c for c in present if c not in _LEADING_COLUMNS])
+    out = ["| " + " | ".join(cols) + " |", "|" + "|".join(["---"] * len(cols)) + "|"]
+    out.extend("| " + " | ".join(_fmt(r.get(c)) for c in cols) + " |" for r in rows)
+    return out
 
 
 def _group_sizes(session: Session) -> dict[str, int]:
