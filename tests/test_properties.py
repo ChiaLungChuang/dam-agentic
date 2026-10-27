@@ -330,3 +330,50 @@ def test_is_scorable_still_owns_the_empty_trace():
     assert score.no_data is True and score.n_crashed == 1
     assert score.property_pass_rate == {}          # never scored at all
     assert load_first(empty).passed is True        # unchanged, deliberately
+
+
+# ── H18-2: an excluded property is named, not silently absent ────────────────
+
+def _scope_line(report: str) -> str:
+    (line,) = [ln for ln in report.splitlines() if ln.startswith("**Scope:**")]
+    return line
+
+
+def test_the_report_names_every_property_it_does_not_run():
+    """A reader of the scored list saw seven rails and had no way to learn that
+    more exist. Each HEURISTIC property must be named, and named as not run — the
+    pipeline never evaluates them, so "evaluated but not aggregated" would be false."""
+    from evals.properties import HEURISTIC, STRUCTURAL
+    line = _scope_line(format_report([aggregate("t", [_good_trace()])]))
+    for p in HEURISTIC:
+        assert f"`{p.__name__}`" in line
+    assert f"{len(STRUCTURAL)} structural rails" in line
+    assert "not run" in line.lower()
+
+
+def test_the_disclosure_says_why():
+    """Naming an exclusion without its reason invites the reader to fill one in."""
+    line = _scope_line(format_report([aggregate("t", [_good_trace()])]))
+    assert "flag to inspect, not a verdict" in line
+
+
+def test_the_disclosure_comes_before_any_rate():
+    """A reader who stops at the first task's numbers has already passed it."""
+    report = format_report([aggregate("t", [_good_trace()])])
+    assert report.index("**Scope:**") < report.index("## t ")
+    assert report.index("**Scope:**") < report.index("pass rate")
+
+
+def test_the_disclosure_survives_a_no_data_report():
+    """Scope is a property of the eval, not of whether any run completed."""
+    crashed = Trace(crashed=True, crash_cause="RateLimit: 429")
+    assert "**Scope:**" in format_report([aggregate("t", [crashed])])
+    assert "**Scope:**" in format_report([])
+
+
+def test_an_unrun_property_is_never_given_a_rate():
+    """The disclosure names them; it must not be mistaken for scoring them."""
+    from evals.properties import HEURISTIC
+    report = format_report([aggregate("t", [_good_trace()])])
+    for p in HEURISTIC:
+        assert f"- {p.__name__}:" not in report
