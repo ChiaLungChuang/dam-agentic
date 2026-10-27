@@ -127,3 +127,73 @@ def spans():
     _SPAN_EXPORTER.clear()
     yield _SPAN_EXPORTER
     _SPAN_EXPORTER.clear()
+
+
+# What the rendered report must show for each metric payload. Shared by the report
+# unit tests and the end-to-end happy path, which runs it over real engine output.
+#
+# Formats independently of report._fmt on purpose: an oracle that borrows the
+# formatter under test would agree with it when it is wrong (a _fmt that returned
+# "" for everything would match a row of empty cells).
+def _expected_cell(v) -> str:
+    return f"{v:.3g}" if isinstance(v, float) else str(v)
+
+
+def _report_metric_sections(text: str) -> dict[str, dict[str, list[str]]]:
+    """family -> key -> the lines under that key's bold heading, from ## Metrics."""
+    body = text.split("## Metrics", 1)[1].split("## Contrasts", 1)[0]
+    sections: dict[str, dict[str, list[str]]] = {}
+    family = key = None
+    for line in body.splitlines():
+        if line.startswith("### "):
+            family, key = line[4:].strip(), "__params__"
+            sections[family] = {key: []}
+        elif family and line.startswith("**") and line.endswith("**"):
+            key = line.strip("*")
+            sections[family][key] = []
+        elif family:
+            sections[family][key].append(line)
+    return sections
+
+
+def unrendered_metric_values(metrics: dict, text: str) -> list[str]:
+    """Every value in `metrics` (family -> payload) the report does not show.
+
+    Empty means complete. A table row counts as shown only if one line of its own
+    table carries every one of the row's non-null values as a cell, so a value
+    that exists somewhere else in the document does not satisfy it."""
+    from collections import Counter
+
+    sections = _report_metric_sections(text)
+    missing = []
+    for family, payload in metrics.items():
+        got = sections.get(family)
+        if got is None:
+            missing.append(f"{family}: no section")
+            continue
+        for key, value in payload.items():
+            if not isinstance(value, list):
+                shown = "—" if value is None else _expected_cell(value)
+                line = f"- {key}: {shown}"
+                if line not in got["__params__"]:
+                    missing.append(f"{family}: parameter line {line!r}")
+                continue
+            lines = got.get(key)
+            if lines is None:
+                missing.append(f"{family}.{key}: no heading")
+                continue
+            if not value:
+                if "_none_" not in lines:
+                    missing.append(f"{family}.{key}: empty, and not said to be")
+                continue
+            rows = [[c.strip() for c in ln.strip().strip("|").split("|")]
+                    for ln in lines if ln.startswith("|")]
+            for item in value:
+                if isinstance(item, dict):
+                    want = Counter(_expected_cell(v) for v in item.values()
+                                   if v is not None)
+                    if not any(want <= Counter(r) for r in rows):
+                        missing.append(f"{family}.{key}: row {item}")
+                elif f"- {item}" not in lines:
+                    missing.append(f"{family}.{key}: item {item!r}")
+    return missing

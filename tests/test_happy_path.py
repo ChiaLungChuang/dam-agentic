@@ -27,9 +27,11 @@ Three choices worth knowing before editing it:
   not consult QC flags (H11-3). Asserting `n == assigned` would pin a known defect
   as expected behaviour. What must hold is that n never exceeds what was assigned.
 
-What this test deliberately does NOT assert: that the rendered report shows every
-metric value. It does not — see the PR that introduced this file. Writing that
-assertion today would be red; writing its negation would pin the defect.
+The report check at the end runs `unrendered_metric_values` over the payloads the
+metrics resource serves: every value the real engine produced must appear in the
+document. This test found that it did not (`_render_metric` kept six columns and
+dropped the rest); tests/test_report_metrics.py pins the fix shape by shape, and
+this pins it on whatever shapes the engine actually emits.
 """
 
 import json
@@ -38,7 +40,7 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from conftest import requires_rtivity
+from conftest import requires_rtivity, unrendered_metric_values
 from evals.harness import MCPHarness
 
 MUT, CTRL = "CG8093_mut", "w1118_ctrl"
@@ -160,6 +162,7 @@ async def test_the_full_pipeline_produces_a_consistent_result(
     assert "_No contrasts run._" not in text
     for family in HEADLINE:
         assert f"### {family}" in text, f"report has no {family} section"
+    assert unrendered_metric_values(metrics, text) == []
     # The contrast row a reader would copy out: the same p and n the tool returned.
     n_str = ", ".join(f"{k}={v}" for k, v in res["n"].items())
     (row,) = [ln for ln in text.splitlines() if ln.startswith(f"| {CONTRAST} |")]
