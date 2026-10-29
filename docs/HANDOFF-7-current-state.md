@@ -335,6 +335,18 @@ mortality, or real per-monitor clocks.
   identically and in silence. **Upstream of every H11 item that touches n or
   death; decide the representation before fixing anything downstream.**
   `docs/HANDOFF-12-monitor-topology.md`.
+
+  **The declaration-only slice has landed; H12-1 stays open.** A declaration's
+  optional `machines:` block names each machine's `food` / `middle` / `plug` beam
+  file; the engine sums a machine's beams per tube before QC, and grouping,
+  exclusions, QC tallies and n are then per machine and per tube
+  (HANDOFF-13 (a), (c), (d)). The beam rig is now *sayable*. Still open:
+  (b) — nothing warns when a multi-file session declares no topology, so an
+  undeclared beam rig is still analysed per beam, in silence, exactly as before
+  (deliberately: the undeclared path is unchanged by this slice); the board-failure
+  detector; the `run_qc` declaration-vs-data cross-check; and a `damsim` corpus
+  case that plants a beam rig. Session `dam-7010fc5ebdc9` is untouched — it was
+  loaded with no `machines:` block and stays the per-beam record of that run.
 - **H13-1 — an accepted n-override is not in the record.** `assign_groups` refuses
   a mapping whose channel count contradicts the declaration's declared n, and the
   override (`n_override_reason` + `confirm_n_override=true`) is surfaced only in

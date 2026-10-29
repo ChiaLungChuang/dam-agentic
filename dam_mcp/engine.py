@@ -158,6 +158,141 @@ def _scan_file(path: Path) -> tuple[dict, list[str]]:
     )
 
 
+# ── topology: summing a machine's beams (HANDOFF-13 (d)) ──────────────────────
+#
+# The order is fixed: sum the beams of a machine first, then run QC and death
+# detection on the summed signal, then everything else. Per-beam death detection
+# is not merely invalid on a beam rig, it is contradictory — one fly reads dead at
+# the plug end and alive at the food end, three verdicts with no way to reconcile
+# them — so nothing downstream ever sees a single beam.
+#
+# Summing happens here, the one place raw counts are touched. The summed series is
+# written as an ordinary DAM2 file into the session's engine work area, so QC, the
+# window tradeoff and the DataStore all read it through their existing, tested
+# paths with no knowledge that summing happened. It is a derived cache, rebuilt
+# from the monitor files on every use: never serialised into the session JSON,
+# never returned by a tool. Per-beam data is retained by not being copied — the
+# monitor files on disk are the retention.
+
+def _read_rows(path: Path) -> dict[datetime, list[str]]:
+    """Timestamp -> the row's first 42 columns. First occurrence wins on a
+    duplicate timestamp (describe_experiment reports duplicates)."""
+    rows: dict[datetime, list[str]] = {}
+    with open(path) as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < _N_EXPECTED_COLS:
+                continue
+            try:
+                ts = datetime.strptime(f"{parts[1]} {parts[2]}", "%d %b %y %H:%M:%S")
+                [int(x) for x in parts[_LIGHT_COL:_N_EXPECTED_COLS]]
+            except (ValueError, IndexError):
+                continue
+            rows.setdefault(ts, parts[:_N_EXPECTED_COLS])
+    return rows
+
+
+def sum_machine(machine: str, beams: dict[str, Path], out_path: Path) -> list[str]:
+    """Sum `beams` ({role: monitor path}) per tube into one DAM2 file at out_path.
+
+    Aligned WITHIN the machine before anything else: the beams can start and stop
+    a read apart, so only timestamps all of them recorded are summed — a tube's
+    sum over a subset of its beams would read as reduced activity, which is how a
+    death call starts. The cross-machine common window is then taken over machines
+    by the existing code, exactly as it is over files. Every read dropped here is
+    reported, never silent: alignment is mechanical, but it is still a decision
+    about which data counts.
+
+    Non-count columns come from the first role's beam (status: the first non-'1'
+    value across beams, so a bad read on any beam stays bad). Returns warnings."""
+    roles = list(beams)
+    rows = {role: _read_rows(beams[role]) for role in roles}
+    for role in roles:
+        if not rows[role]:
+            raise ToolError(
+                f"Machine '{machine}': {beams[role].name} ({role}) has no rows that "
+                "parse as DAM2 data, so the machine cannot be summed. Fix or replace "
+                "the file, or leave this machine out of the declaration and the load."
+            )
+    bins = {role: _bin_seconds(sorted(rows[role])) for role in roles}
+    if len(set(bins.values())) > 1:
+        detail = ", ".join(f"{beams[r].name} ({r}) {bins[r]} s" for r in roles)
+        raise ToolError(
+            f"Machine '{machine}': its beams disagree on bin width ({detail}). "
+            "Counts from different bin widths cannot be summed per tube — confirm "
+            "the run interval on each board before loading this machine."
+        )
+    shared = sorted(set.intersection(*(set(rows[r]) for r in roles)))
+    if not shared:
+        raise ToolError(
+            f"Machine '{machine}': its beams share no timestamp, so there is no "
+            "interval over which all of them watched the same tubes. Check that "
+            f"{[beams[r].name for r in roles]} are the boards of one rack."
+        )
+
+    warnings: list[str] = []
+    dropped = {r: len(rows[r]) - len(shared) for r in roles}
+    if any(dropped.values()):
+        detail = ", ".join(f"{dropped[r]} of {beams[r].name} ({r})"
+                           for r in roles if dropped[r])
+        warnings.append(
+            f"Machine '{machine}': summed over the {len(shared)} reads all "
+            f"{len(roles)} beams recorded; dropped {detail} outside that shared "
+            "interval. Mechanical alignment, reported because it decides which data "
+            "counts."
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as fh:
+        for i, ts in enumerate(shared, start=1):
+            beam_rows = [rows[r][ts] for r in roles]
+            out = list(beam_rows[0])
+            out[0] = str(i)
+            statuses = [br[3] for br in beam_rows]
+            out[3] = next((s for s in statuses if s.strip() != "1"), statuses[0])
+            for col in range(_LIGHT_COL, _N_EXPECTED_COLS):
+                out[col] = str(sum(int(br[col]) for br in beam_rows))
+            fh.write("\t".join(out) + "\n")
+    return warnings
+
+
+def _bin_seconds(stamps: list[datetime]) -> int | None:
+    gaps: dict[int, int] = {}
+    for a, b in zip(stamps, stamps[1:]):
+        g = int((b - a).total_seconds())
+        gaps[g] = gaps.get(g, 0) + 1
+    return max(gaps, key=gaps.get) if gaps else None
+
+
+def build_machines(session: Session, store: SessionStore) -> tuple[list[dict], list[str]]:
+    """Write each declared machine's summed file; return (structural summaries,
+    warnings). The summaries have the shape of `monitors` entries, with the
+    machine id as `file` — so the machine id is the key callers use."""
+    by_name = {Path(p).name: Path(p) for p in session.paths}
+    machines: dict[str, dict[str, Path]] = {}
+    for b in session.beams:
+        machines.setdefault(b["machine"], {})[b["role"]] = by_name[b["file"]]
+    out_dir = store.session_dir(session.session_id) / "machines"
+    summaries, warnings = [], []
+    for machine, beams in machines.items():
+        out_path = out_dir / machine
+        warnings += sum_machine(machine, beams, out_path)
+        summary, scan_warnings = _scan_file(out_path)
+        summaries.append(summary)
+        warnings += scan_warnings
+    return summaries, warnings
+
+
+def analysis_paths(session: Session, store: SessionStore) -> list[str]:
+    """The files QC and analysis read: each machine's summed file when topology is
+    declared — rebuilt from the monitor files, so it cannot go stale — and the
+    loaded monitor files otherwise, unchanged."""
+    if not session.beams:
+        return session.paths
+    build_machines(session, store)
+    return [m["path"] for m in session.machine_monitors]
+
+
 # ── QC (describe_experiment / run_qc) ─────────────────────────────────────────
 
 def run_validate(paths: list[str], death_hours: float, out_path: Path,
@@ -312,7 +447,7 @@ def build_conditions(session: Session) -> pd.DataFrame:
     # metrics are computed over exactly the window QC was run on.
     win = session.window or {}
     per_file = {}
-    for m in session.monitors:
+    for m in session.analysis_monitors:
         start = max(m["first_ts"], win["start"]) if win.get("start") else m["first_ts"]
         stop = min(m["last_ts"], win["end"]) if win.get("end") else m["last_ts"]
         per_file[m["file"]] = (start, stop)
@@ -351,7 +486,7 @@ def build_store(session: Session, store: SessionStore):
 
     work = store.session_dir(session.session_id) / "work"
     work.mkdir(parents=True, exist_ok=True)
-    for p in session.paths:
+    for p in analysis_paths(session, store):
         src = Path(p)
         dest = work / src.name
         if dest.exists() or dest.is_symlink():

@@ -65,6 +65,7 @@ def render_manifest(session: Session) -> str:
             f"{m['first_ts']} → {m['last_ts']} | {m['bin_seconds']} |"
         )
     lines.append("")
+    lines.extend(_machines_section(session))
     lines.append("## Groups")
     if session.groups:
         sizes = _group_sizes(session)
@@ -85,6 +86,28 @@ def render_manifest(session: Session) -> str:
     else:
         lines.append("_None applied._")
     return "\n".join(lines)
+
+
+def _machines_section(session: Session) -> list[str]:
+    """Which files are the beams of which machine, by role. Nothing on a session
+    with no declared topology, so the undeclared manifest is unchanged."""
+    if not session.beams:
+        return []
+    from .config import ROLES
+    rows: dict[str, dict[str, str]] = {}
+    for b in session.beams:
+        rows.setdefault(b["machine"], {})[b["role"]] = b["file"]
+    lines = ["## Machines",
+             "| Machine | " + " | ".join(ROLES) + " |",
+             "|---|" + "---|" * len(ROLES)]
+    for machine, roles in rows.items():
+        lines.append(f"| {machine} | " + " | ".join(roles.get(r, "—") for r in ROLES)
+                     + " |")
+    lines += ["",
+              "Each machine's beams are summed per tube before QC and analysis, so "
+              "every QC call, group size and n below counts tubes — animals — not "
+              "beams.", ""]
+    return lines
 
 
 def render_report(session: Session) -> str:
