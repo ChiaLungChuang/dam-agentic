@@ -89,6 +89,18 @@ class Session:
     metrics: dict[str, dict] = field(default_factory=dict)
     contrasts: dict[str, dict] = field(default_factory=dict)
 
+    # Monitor topology, snapshotted at load from the declaration's machines: block
+    # (HANDOFF-13): [{"machine", "role", "file"}]. Keyed by ROLE, never by file
+    # order — an ordering convention that lives in how files happened to be listed
+    # is the unrecorded fact topology exists to remove. Empty is the undeclared
+    # case: every file its own animals, exactly as before.
+    beams: list[dict] = field(default_factory=list)
+
+    # When beams are declared, what analysis runs on: one structural summary per
+    # machine, of its beams summed per tube (same shape as `monitors`). `monitors`
+    # still lists every physical file, because that is what was loaded.
+    machine_monitors: list[dict] = field(default_factory=list)
+
     # ── convenience ────────────────────────────────────────────────────────────
 
     @property
@@ -100,6 +112,16 @@ class Session:
 
     def excluded_set(self) -> set[tuple[str, int]]:
         return {(e["monitor"], int(e["channel"])) for e in self.exclusions}
+
+    @property
+    def analysis_monitors(self) -> list[dict]:
+        """The units channels belong to for QC, grouping and exclusion: machines
+        when topology is declared, the monitor files otherwise."""
+        return self.machine_monitors if self.beams else self.monitors
+
+    def beam_of(self, filename: str) -> dict | None:
+        """{"machine", "role", "file"} if `filename` is a declared beam, else None."""
+        return next((b for b in self.beams if b["file"] == filename), None)
 
 
 class SessionStore:

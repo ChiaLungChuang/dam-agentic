@@ -5,6 +5,16 @@
 Read `HANDOFF-12-monitor-topology.md` first — this document assumes the finding
 and does not restate the evidence for it.
 
+> **Status, added when the first slice landed.** (a), (c) and (d) are implemented
+> as written for a declared rig: the `machines:` block in the declaration, the
+> closed `food` / `middle` / `plug` vocabulary, summing in the engine before QC,
+> `Session.beams` keyed by role, and grouping by machine + tube. **(b) is not** —
+> the undeclared path is deliberately unchanged, so no warning yet fires when a
+> multi-file session declares no topology. Not yet built either: the board-failure
+> detector, the declaration-vs-data cross-check below, and step 4's `damsim` case.
+> `machines: independent` is accepted and means exactly what absence means. The
+> text below is the proposal as agreed and is left as it was.
+
 **No code, no schema, no test changes.** This is a recommendation on four
 decisions that gate everything downstream. Each carries the alternatives and the
 reason for the choice, so disagreeing with a recommendation does not mean

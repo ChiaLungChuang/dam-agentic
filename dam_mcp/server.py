@@ -86,6 +86,13 @@ def load_experiment(paths: list[str], name: str) -> dict:
     assign_groups and apply_exclusions. They are filenames, not paths — use them
     verbatim rather than the paths passed in here.
 
+    BEAM RIGS. If the declaration in effect has a `machines:` block, the files are
+    the beams of racks of tubes: each machine's beams are summed per tube before
+    anything is computed, and `monitor_keys` are then the MACHINE ids (e.g. "M1"),
+    with channels 1-32 meaning tubes — so n counts animals, not beams. The result
+    also carries `machines`, which file is which beam. Every loaded file must be a
+    beam of a declared machine, and a machine's beams are loaded all together.
+
     Does NOT return activity counts — those stay server-side for the whole session.
     Call run_qc next; metrics computed before QC are not trustworthy.
     """
@@ -95,24 +102,36 @@ def load_experiment(paths: list[str], name: str) -> dict:
             "Monitor*.txt files themselves, e.g. [\"/data/exp/Monitor1.txt\", ...]."
         )
     monitors, warnings = engine.scan_structural([str(p) for p in paths])
+    # Before the session exists: a refused topology must not leave one behind.
+    beams, topology_warnings = _resolve_beams(_declared_machines(), monitors)
     session = STORE.create(name=name, paths=[str(p) for p in paths])
     session.monitors = monitors
+    if beams:
+        session.beams = beams
+        session.machine_monitors, summed_warnings = engine.build_machines(session, STORE)
+        warnings = warnings + topology_warnings + summed_warnings
     session.warnings = warnings
     STORE.save(session)
 
-    starts = [m["first_ts"] for m in monitors]
-    ends = [m["last_ts"] for m in monitors]
-    return LoadResult(
+    units = session.analysis_monitors
+    starts = [m["first_ts"] for m in units]
+    ends = [m["last_ts"] for m in units]
+    result = LoadResult(
         session_id=session.session_id,
         name=name,
         n_monitors=len(monitors),
         monitors=[MonitorSummary(**{k: m[k] for k in
                   ("file", "n_reads", "n_channels", "first_ts", "last_ts",
                    "bin_seconds")}) for m in monitors],
-        monitor_keys=[m["file"] for m in monitors],
+        monitor_keys=[m["file"] for m in units],
         time_window=[max(starts), min(ends)],
         warnings=warnings,
     ).model_dump()
+    # Present only on a beam rig, so the undeclared result is byte-identical to
+    # what it was before topology existed.
+    if beams:
+        result["machines"] = _machine_table(beams)
+    return result
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -147,7 +166,8 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     sees more late deaths at the cost of calling deep quiescence death — a real
     tradeoff, which window_tradeoff surfaces.
 
-    Returns a per-monitor tally, the flagged channels with the evidence for each
+    Returns a per-monitor tally — per MACHINE on a beam rig, where QC runs on each
+    machine's beams summed per tube — the flagged channels with the evidence for each
     call, and decisions_required — the list of exclusions a human must rule on. It
     does NOT apply any exclusion; QC flags, it never fixes. Run this after
     load_experiment and before any compute_* tool.
@@ -159,7 +179,8 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
             "continuous silence used to call a channel dead (this lab's default is 12)."
         )
     out = STORE.session_dir(session_id) / f"qc_{death_hours}.json"
-    raw = engine.run_validate(session.paths, death_hours=death_hours, out_path=out,
+    raw = engine.run_validate(engine.analysis_paths(session, STORE),
+                              death_hours=death_hours, out_path=out,
                               window=session.window)
     shaped = engine.qc_tally_and_decisions(raw)
 
@@ -205,7 +226,8 @@ def window_tradeoff(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -
         raise ToolError(
             f"death_hours must be positive; got {death_hours}."
         )
-    result = engine.window_tradeoff(session.paths, death_hours=death_hours)
+    result = engine.window_tradeoff(engine.analysis_paths(session, STORE),
+                                    death_hours=death_hours)
     return TradeoffResult(
         session_id=session_id,
         common_start=result["common_start"],
@@ -252,8 +274,8 @@ def set_analysis_window(
 
     window = {"start": start, "end": end}
     out = STORE.session_dir(session_id) / "qc_windowed.json"
-    raw = engine.run_validate(session.paths, death_hours=death_hours, out_path=out,
-                              window=window)
+    raw = engine.run_validate(engine.analysis_paths(session, STORE),
+                              death_hours=death_hours, out_path=out, window=window)
     shaped = engine.qc_tally_and_decisions(raw)
 
     session.window = window
@@ -297,6 +319,9 @@ def assign_groups(
     The monitor key is a filename as returned in load_experiment's `monitor_keys`
     (e.g. "Monitor1.txt"). A full path is also accepted and reduced to its
     filename, so paths handed in by a caller do not have to be converted first.
+    On a beam rig (`machines:` declared) the keys are machine ids instead (e.g.
+    "M1") and channels are its tubes; a beam's filename is refused, naming the
+    machine and role it belongs to.
 
     `channels` accepts exactly three forms:
       * [low, high]        — a two-element INCLUSIVE range, e.g. [1, 16]
@@ -335,7 +360,7 @@ def assign_groups(
             "{group_label: {monitor_filename: channels}}. Humans provide this; the "
             "model must not infer groups from the data."
         )
-    known_files = {m["file"] for m in session.monitors}
+    known_files = {m["file"] for m in session.analysis_monitors}
     groups: list[dict] = []
     order_of: dict[str, int] = {}
     seen: dict[str, set[int]] = {}
@@ -355,6 +380,7 @@ def assign_groups(
             # tool accepts either instead of making the caller guess.
             monitor = os.path.basename(str(raw_monitor))
             if monitor not in known_files:
+                _refuse_beam_key(session, monitor)
                 raise ToolError(
                     f"Monitor '{raw_monitor}' is not in this session. Loaded files "
                     f"are: {sorted(known_files)}. Use one of those keys (they are "
@@ -392,11 +418,12 @@ def assign_groups(
     assigned = {(g["monitor"], g["channel"]) for g in groups}
     unassigned = [
         f"{m['file']} ch{ch}"
-        for m in session.monitors
+        for m in session.analysis_monitors
         for ch in range(1, (m["n_channels"] or 32) + 1)
         if (m["file"], ch) not in assigned
     ]
-    warnings = [w for w in (_confound_warning(groups),
+    warnings = [w for w in (_confound_warning(
+                                groups, "machine" if session.beams else "monitor"),
                             _unassigned_declared_warning(set(sizes)),
                             _n_override_warning(n_overrides)) if w]
     warnings += _declaration_warnings()          # e.g. ignored values under groups:
@@ -420,8 +447,8 @@ def apply_exclusions(
 
     `exclusions` is a list of "MonitorFile:channel" (e.g. "Monitor1.txt:5"). The
     monitor key is one of load_experiment's `monitor_keys`; a full path is accepted
-    and reduced to its filename. `reason` is recorded with each and shown in the
-    report.
+    and reduced to its filename. On a beam rig the keys are machine ids ("M1:5" is
+    tube 5 of machine M1). `reason` is recorded with each and shown in the report.
 
     A key that matches no loaded monitor is refused — that is always a caller
     mistake (a typo, an unloaded monitor, a stale key from another session), never
@@ -452,8 +479,10 @@ def apply_exclusions(
     # here rather than being recorded as an exclusion that matches nothing. This
     # is the same refusal assign_groups makes; the two tools disagreeing about an
     # identical bad key was the defect.
-    known_files = {m["file"] for m in session.monitors}
+    known_files = {m["file"] for m in session.analysis_monitors}
     unknown = sorted({m for m, _ in parsed if m not in known_files})
+    for u in unknown:
+        _refuse_beam_key(session, u)
     if unknown:
         names = ", ".join(f"'{u}'" for u in unknown)
         noun, verb = ("Monitor", "is") if len(unknown) == 1 else ("Monitors", "are")
@@ -954,10 +983,99 @@ def _unassigned_declared_warning(assigned: set[str]) -> str | None:
     )
 
 
-def _confound_warning(groups: list[dict]) -> str | None:
+def _declared_machines() -> dict[str, dict[str, str]]:
+    """The declaration's machines:, or {} when none is declared.
+
+    load_experiment has always worked with no declaration in effect, and still
+    does: with DAM_PREREG_PATH unset there is no topology to read, which is the
+    undeclared case. A declaration that is set but malformed refuses here, loudly —
+    load is the first tool that now reads it."""
+    if not os.environ.get("DAM_PREREG_PATH"):
+        return {}
+    return config.declared_machines()
+
+
+def _resolve_beams(machines: dict[str, dict[str, str]],
+                   monitors: list[dict]) -> tuple[list[dict], list[str]]:
+    """[{"machine", "role", "file"}] for the loaded files, plus warnings.
+
+    Refuses a loaded file that is no machine's beam — on a declared rig it would be
+    analysed as independent animals beside summed machines, the ambiguity the
+    block exists to remove — and a machine loaded without all of its beams, for
+    the same reason the declaration refuses a machine without all of its roles."""
+    if not machines:
+        return [], []
+    owner = {f: (mid, role) for mid, roles in machines.items()
+             for role, f in roles.items()}
+    loaded = [m["file"] for m in monitors]
+    stray = [f for f in loaded if f not in owner]
+    if stray:
+        raise ToolError(
+            f"{stray} {'is' if len(stray) == 1 else 'are'} loaded but no machine's "
+            f"beam in the declaration's machines: block (declared: "
+            f"{sorted(owner)}). With machines: declared, every loaded file must be "
+            "a beam of a declared machine — one outside them would be analysed as "
+            "independent animals beside summed machines. Add it to its machine, or "
+            "load it in a separate session. Nothing was loaded."
+        )
+    loaded_set = set(loaded)
+    beams: list[dict] = []
+    not_loaded: list[str] = []
+    for mid, roles in machines.items():
+        present = [r for r in config.ROLES if roles[r] in loaded_set]
+        if not present:
+            not_loaded.append(mid)
+            continue
+        if len(present) < len(config.ROLES):
+            absent = {r: roles[r] for r in config.ROLES if r not in present}
+            raise ToolError(
+                f"Machine '{mid}' is loaded without {absent}. Its beams are summed "
+                "per tube before QC, so that a summed zero means the fly crossed no "
+                "beam anywhere in the tube; summed short, a fly that stays away "
+                "from the missing positions reads as dead. Load all of its files, "
+                "or none of them. Nothing was loaded."
+            )
+        beams += [{"machine": mid, "role": r, "file": roles[r]} for r in config.ROLES]
+    warnings = []
+    if not_loaded:
+        warnings.append(
+            f"Declared machine(s) {not_loaded} were not loaded; this session covers "
+            f"{sorted({b['machine'] for b in beams})} only."
+        )
+    return beams, warnings
+
+
+def _machine_table(beams: list[dict]) -> list[dict]:
+    """[{"machine": "M1", "food": "Monitor1.txt", ...}] — which file is which beam."""
+    table: dict[str, dict] = {}
+    for b in beams:
+        table.setdefault(b["machine"], {"machine": b["machine"]})[b["role"]] = b["file"]
+    return list(table.values())
+
+
+def _refuse_beam_key(session, key: str) -> None:
+    """On a beam rig, a monitor filename is not a key: name the machine and the
+    role instead of substituting one, so the caller learns the structure."""
+    beam = session.beam_of(key)
+    if beam is None:
+        return
+    raise ToolError(
+        f"'{key}' is the {beam['role']} beam of machine '{beam['machine']}'. On "
+        "this session each machine's beams are summed per tube before anything is "
+        "computed, so a single beam is not addressable: use the machine id as the "
+        f"key — e.g. '{beam['machine']}' with channels 1-32 meaning its tubes. "
+        f"Keys in this session: {[m['file'] for m in session.analysis_monitors]}. "
+        "Nothing was changed."
+    )
+
+
+def _confound_warning(groups: list[dict], noun: str = "monitor") -> str | None:
     """#13: flag when treatment is confounded with monitor — every group's channels
     come from a single monitor and no monitor is shared between groups. Structural,
-    no biology; the human still decides whether it is intentional."""
+    no biology; the human still decides whether it is intentional.
+
+    On a beam rig the unit is the machine, and the confound is the same one with
+    the right name: a group occupying one machine is aliased with that rack."""
     from collections import defaultdict
     group_monitors: dict[str, set[str]] = defaultdict(set)
     monitor_groups: dict[str, set[str]] = defaultdict(set)
@@ -973,11 +1091,11 @@ def _confound_warning(groups: list[dict]) -> str | None:
     pairs = "; ".join(f"'{lab}' ⟵ {sorted(ms)[0]}"
                       for lab, ms in group_monitors.items())
     return (
-        "Treatment is confounded with monitor: " + pairs + ". A monitor effect (IR "
+        f"Treatment is confounded with {noun}: " + pairs + f". A {noun} effect (IR "
         "calibration, incubator position, thermal gradient, food batch) is "
         "indistinguishable from a treatment effect, and more n does not help. "
         "Proceed only if this is intentional; for future runs alternate conditions "
-        "within each monitor."
+        f"within each {noun}."
     )
 
 

@@ -24,6 +24,7 @@ YAML typo in someone's pre-registration read as a crashing server.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from .errors import ToolError
@@ -45,6 +46,16 @@ METRICS = ("total_sleep", "mean_bout_duration", "counts_per_waking_minute")
 
 #: The tests run_contrast supports.
 TESTS = ("wilcoxon", "t")
+
+#: The beam positions a machine declares (HANDOFF-13 (c)). Roles, not indices,
+#: because a role can be wrong: `middle: Monitor8.txt` is a claim someone can check
+#: against the rig, while any file can be `beam: 2`. Closed like PHASES — a rig
+#: with a different arrangement adds its names here, in one place.
+ROLES = ("food", "middle", "plug")
+
+# A machine id is the key callers use in place of a monitor filename, and the name
+# of the summed file the engine writes for it, so it must be safe as both.
+_MACHINE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 
 
 def config_path() -> Path:
@@ -103,6 +114,7 @@ def load_config(path: Path | None = None) -> dict:
     _check_experiment_matches_filename(data, path)
     groups = _parse_groups(data, path)
     _parse_declared_n(data, path)          # refuses a non-positive declared n here
+    _parse_machines(data, path)            # refuses a malformed topology here
 
     contrasts = data.get("contrasts") or []
     if not isinstance(contrasts, list):
@@ -225,6 +237,101 @@ def declared_n(path: Path | None = None) -> dict[str, int]:
     every declaration written so far."""
     path = path or config_path()
     return _parse_declared_n(load_config(path), path)
+
+
+def _parse_machines(data: dict, path: Path) -> dict[str, dict[str, str]]:
+    """{machine_id: {role: monitor filename}} from the optional `machines:` block.
+
+    Absent — or `machines: independent`, which says the same thing out loud —
+    means every monitor file is its own set of animals: the behaviour before
+    topology existed, unchanged. Declared, it says which files are the beams of
+    one rack of tubes, so the engine sums them per tube before QC (HANDOFF-13 (d)).
+
+    Refused at load, where it is cheapest to say: a machine without all of ROLES,
+    a role outside ROLES, a file named twice, and a value that is a path rather
+    than a filename."""
+    raw = data.get("machines")
+    if raw is None or (isinstance(raw, str) and raw.strip() == "independent"):
+        return {}
+    if not isinstance(raw, dict) or not raw:
+        raise ToolError(
+            f"{path} has a 'machines:' value of {raw!r}. It must be a mapping of "
+            f"machine id to {{{', '.join(f'{r}: <monitor file>' for r in ROLES)}}}, "
+            "e.g. 'M1: {food: Monitor1.txt, middle: Monitor2.txt, plug: "
+            "Monitor3.txt}'. If every file is its own set of animals, omit the key "
+            "or write 'machines: independent'."
+        )
+    out: dict[str, dict[str, str]] = {}
+    owner: dict[str, str] = {}
+    for mid, roles in raw.items():
+        mid = str(mid)
+        if not _MACHINE_ID.match(mid):
+            raise ToolError(
+                f"{path} declares machine '{mid}'. A machine id is used as the key "
+                "for its tubes in assign_groups and apply_exclusions, so it must be "
+                "1-32 characters of letters, digits, '_' or '-', starting with a "
+                "letter or digit (e.g. 'M1')."
+            )
+        if not isinstance(roles, dict):
+            raise ToolError(
+                f"{path} declares machine '{mid}' as {roles!r}. It must map each of "
+                f"{list(ROLES)} to that beam's monitor file."
+            )
+        unknown = sorted(str(r) for r in roles if r not in ROLES)
+        if unknown:
+            raise ToolError(
+                f"{path} declares role(s) {unknown} for machine '{mid}'. The roles "
+                f"are {list(ROLES)} — the position of each detector board along the "
+                "tube. A rig with a different arrangement extends ROLES in "
+                "dam_mcp/config.py; it is not declared around."
+            )
+        missing = [r for r in ROLES if r not in roles]
+        if missing:
+            n = len(ROLES) - len(missing)
+            raise ToolError(
+                f"{path} declares machine '{mid}' with {n} of the {len(ROLES)} "
+                f"roles; it is missing {missing}. This is refused rather than "
+                "summed short. The beams of a tube are summed before QC so that a "
+                "summed zero means the fly crossed no beam anywhere in the tube; "
+                f"summed from {n} of {len(ROLES)}, a fly that spends its last hours "
+                f"at the {missing[0]} end reads as dead — the per-beam contradiction "
+                "this block exists to remove, put back for one machine. If a beam's "
+                "file is missing or unusable, leave the machine out of both "
+                "machines: and load_experiment instead. If the rig really has "
+                f"{n} board(s) per machine, that is a different apparatus: its roles "
+                "belong in ROLES in dam_mcp/config.py, a code change rather than a "
+                "declaration edit."
+            )
+        out[mid] = {}
+        for role in ROLES:
+            fname = roles[role]
+            if not isinstance(fname, str) or not fname.strip():
+                raise ToolError(
+                    f"{path} declares {mid}.{role} as {fname!r}. It must be the "
+                    "monitor's filename, e.g. 'Monitor1.txt'."
+                )
+            fname = fname.strip()
+            if os.path.basename(fname) != fname:
+                raise ToolError(
+                    f"{path} declares {mid}.{role} as '{fname}', a path. Use the "
+                    f"filename alone ('{os.path.basename(fname)}'): files are matched "
+                    "to the paths given to load_experiment by name."
+                )
+            if fname in owner:
+                raise ToolError(
+                    f"{path} names '{fname}' twice — as {owner[fname]} and as "
+                    f"{mid}.{role}. Every monitor file is exactly one beam of exactly "
+                    "one machine."
+                )
+            owner[fname] = f"{mid}.{role}"
+            out[mid][role] = fname
+    return out
+
+
+def declared_machines(path: Path | None = None) -> dict[str, dict[str, str]]:
+    """{machine_id: {role: filename}}; {} when the declaration declares none."""
+    path = path or config_path()
+    return _parse_machines(load_config(path), path)
 
 
 def _check_contrast_groups_are_declared(c: dict, groups: set[str],
