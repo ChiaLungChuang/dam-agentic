@@ -12,7 +12,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 
-from .properties import STRUCTURAL, evaluate
+from .properties import HEURISTIC, STRUCTURAL, evaluate
 from .trace import Trace
 
 _SEQUENCE = {"load_first", "qc_before_metrics", "groups_before_metrics"}
@@ -144,6 +144,7 @@ def format_report(scores: list[TaskScore], model_id: str | None = None) -> str:
     if model_id:
         # A property-violation rate without a model identifier is not a result.
         lines += [f"**Model:** `{model_id}`", ""]
+    lines += [_scope_line(), ""]
     for s in scores:
         n_str = f"n={s.n_completed}/{s.n_attempted} completed"
         if s.n_crashed:
@@ -196,6 +197,26 @@ def format_report(scores: list[TaskScore], model_id: str | None = None) -> str:
                  "run approached reads `n/a`, never 1.0: it was not passed, it was "
                  "not asked (issue #1)._")
     return "\n".join(lines)
+
+
+def _scope_line() -> str:
+    """Which properties this report covers, and which it does not run (H18-2).
+
+    The HEURISTIC properties are excluded on purpose — both judge the final
+    answer's prose by pattern-matching, so their own docstrings treat a result as
+    something to inspect rather than a verdict. The exclusion was right; what was
+    wrong is that it left no trace: the scored list was simply shorter, and a
+    reader could not learn anything had been withheld. Stated before any rate, on
+    every report including NO DATA ones, because it is a fact about the eval, not
+    about a run.
+
+    "Not run", not "evaluated but not aggregated": `aggregate` calls `evaluate`
+    with its STRUCTURAL default, and nothing in the pipeline evaluates them."""
+    names = ", ".join(f"`{p.__name__}`" for p in HEURISTIC)
+    return (f"**Scope:** rates below cover the {len(STRUCTURAL)} structural rails. "
+            f"Not run in this eval: {names} (heuristic) — they judge the final "
+            "answer's prose by pattern-matching, so a result would be a flag to "
+            "inspect, not a verdict.")
 
 
 def _crash_lines(s: TaskScore) -> list[str]:

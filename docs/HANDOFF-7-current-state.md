@@ -431,7 +431,18 @@ mortality, or real per-monitor clocks.
   Closing it therefore needs two things, and only the first is about scoring:
   a positive control that states a number *taken from a tool result* and asserts
   `passed is True` end-to-end, and a line in `format_report` naming `HEURISTIC`
-  properties as evaluated-but-not-aggregated, with the reason.
+  properties as excluded, with the reason.
+
+  **The disclosure half has shipped; the positive control has not, so H18-2 stays
+  open.** `format_report` now opens with a `**Scope:**` line naming each
+  `HEURISTIC` property, the structural count, and the reason — before any rate, on
+  every report including NO DATA ones, built from the lists so it cannot go stale.
+  One correction made while building it: this entry first said
+  "evaluated-but-not-aggregated", and that is false. Nothing in the pipeline
+  evaluates them — `aggregate` calls `evaluate` with its `STRUCTURAL` default and
+  no caller passes `HEURISTIC` — so the line says **not run**. Making the original
+  wording true would have meant running them and printing a result, which is the
+  number this entry says not to publish.
 
   **The wider audit, which is the lesser finding.** At the unit level all seven
   `STRUCTURAL` rails have a positive control in `tests/test_properties.py`, on
