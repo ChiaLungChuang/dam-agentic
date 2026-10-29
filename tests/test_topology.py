@@ -47,6 +47,12 @@ def split_into_beams(src: Path, out_dir: Path, names: tuple[str, str, str],
                      tail_at_food: int | None = None) -> list[Path]:
     """Three beam files (food, middle, plug) whose per-tube sum equals `src`.
 
+    The split respects the tube's geometry: in any read where the fly moves at
+    all, the middle beam takes the first count and further counts alternate
+    between the food and plug ends by read. So a healthy fly never reaches both
+    ends without passing the middle — the property the board checks rely on —
+    and every beam carries activity across the run.
+
     `tail_at_food` plants the case per-beam QC gets wrong: for that channel, every
     count in the final TAIL_ROWS goes to the food beam — a fly that settled at the
     food end and stopped visiting the rest of its tube. Alive, but silent on the
@@ -57,7 +63,10 @@ def split_into_beams(src: Path, out_dir: Path, names: tuple[str, str, str],
         parts = [list(r[:42]), list(r[:42]), list(r[:42])]
         for col in range(10, 42):
             c = int(r[col])
-            share = [c - 2 * (c // 3), c // 3, c // 3]
+            rest = max(c - 1, 0)
+            ends = [(rest + 1) // 2, rest // 2]
+            food_n, plug_n = ends if i % 2 == 0 else ends[::-1]
+            share = [food_n, min(c, 1), plug_n]
             if tail_at_food == col - 9 and i >= len(rows) - TAIL_ROWS:
                 share = [c, 0, 0]
             for b in range(3):
@@ -469,3 +478,178 @@ async def test_metrics_compute_on_tubes(rig, tmp_path, monkeypatch):
     rows = r.data["summary"]["total_sleep_time_h"]
     assert {row["labels"] for row in rows} == {"ctrl", "mut"}
     assert all(1 <= row["n"] <= 4 for row in rows)
+
+
+# ── board-failure checks (HANDOFF-13 follow-on, option C) ─────────────────────
+#
+# A healthy rig is split exactly as above; then failures are planted into the
+# beam files only, keeping every fly alive in the summed signal — the point of
+# these checks is that summing hides a failing board, so they read the beams.
+
+CUT = 14 * 60               # planted failures last 14 h: past the 12 h death rule
+
+
+def _tail_active_channels(src: Path, n: int, exclude=()) -> list[int]:
+    """Channels with plenty of activity in the final CUT reads, including reads
+    of 2 — so the splitter gives both end beams counts there."""
+    rows = _rows(src)
+    found = []
+    for ch in range(1, 33):
+        tail = [int(r[9 + ch]) for r in rows[-CUT:]]
+        if ch not in exclude and sum(tail) >= 40 and sum(c >= 2 for c in tail) >= 20:
+            found.append(ch)
+        if len(found) == n:
+            return found
+    raise AssertionError("not enough active channels in the fixture corpus")
+
+
+def _plant(paths: list[Path], *, dropout_tubes=(), contradiction_tube=None) -> int:
+    """Edit a machine's (food, middle, plug) beam files in place. Returns the
+    index of the last read before the planted failures.
+
+    dropout_tubes: the plug beam goes silent after the same read in each, its
+    counts moved to the food beam so the fly is still seen and the sum unchanged.
+    contradiction_tube: the middle beam goes silent, its counts moved to the food
+    beam, while the plug beam keeps crossing — food and plug both active after."""
+    food, middle, plug = (_rows(p) for p in paths)
+    last = len(food) - CUT - 1
+    col = lambda tube: 9 + tube          # noqa: E731
+    for tube in dropout_tubes:
+        c = col(tube)
+        plug[last][c] = str(max(1, int(plug[last][c])))       # one shared last read
+        for i in range(last + 1, len(food)):
+            food[i][c] = str(int(food[i][c]) + int(plug[i][c]))
+            plug[i][c] = "0"
+    if contradiction_tube is not None:
+        c = col(contradiction_tube)
+        for i in range(last + 1, len(food)):
+            food[i][c] = str(int(food[i][c]) + int(middle[i][c]))
+            middle[i][c] = "0"
+    for p, rows in zip(paths, (food, middle, plug)):
+        _write(p, rows)
+    return last
+
+
+@pytest.fixture(scope="module")
+def faulty_rig(corpus_dir, tmp_path_factory):
+    """M1 healthy; M2 with a three-tube plug-board dropout and one middle-beam
+    contradiction, in different tubes. A second variant drops only two tubes."""
+    src1, src2 = corpus_dir / "Monitor1.txt", corpus_dir / "Monitor2.txt"
+    dropped = _tail_active_channels(src2, 3)
+    (contra,) = _tail_active_channels(src2, 1, exclude=dropped)
+    out = {}
+    for name, tubes in (("three", dropped), ("two", dropped[:2])):
+        root = tmp_path_factory.mktemp(f"faulty_{name}")
+        split_into_beams(src1, root, BEAMS["M1"])
+        m2 = split_into_beams(src2, root, BEAMS["M2"])
+        last = _plant(m2, dropout_tubes=tubes, contradiction_tube=contra)
+        out[name] = {"files": [str(root / f) for m in ("M1", "M2") for f in BEAMS[m]],
+                     "last_read": _rows(m2[0])[last]}
+    out["dropped"], out["contra"] = dropped, contra
+    return out
+
+
+async def _qc(tmp_path, monkeypatch, files, machines=MACHINES, window_end=None):
+    monkeypatch.setenv("DAM_PREREG_PATH", _declaration(tmp_path, machines))
+    async with MCPHarness(tmp_path / "s") as h:
+        sid = (await _load(h, files))["session_id"]
+        if window_end:
+            r = await h.call("set_analysis_window", session_id=sid, end=window_end)
+        else:
+            r = await h.call("run_qc", session_id=sid)
+    assert not r.is_error, r.text
+    return r.data
+
+
+def _board(decisions):
+    return [d for d in decisions if "board (" in d]
+
+
+def _middle(decisions):
+    return [d for d in decisions if "impossible without passing the middle" in d]
+
+
+@pytest.mark.asyncio
+async def test_a_same_read_dropout_on_one_board_is_flagged(faulty_rig, tmp_path,
+                                                           monkeypatch):
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["three"]["files"])
+    (flag,) = _board(qc["decisions_required"])
+    tubes = ", ".join(map(str, faulty_rig["dropped"]))
+    assert flag.startswith(f"M2 plug board (Monitor6.txt): tubes {tubes} all went "
+                           "silent after the same read")
+    assert "kept crossing another board" in flag
+
+
+@pytest.mark.asyncio
+async def test_two_tubes_dropping_together_are_not_enough(faulty_rig, tmp_path,
+                                                          monkeypatch):
+    """The coincidence bound: two last visits sharing a minute can be chance."""
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["two"]["files"])
+    assert _board(qc["decisions_required"]) == []
+
+
+@pytest.mark.asyncio
+async def test_a_crossing_contradiction_is_flagged(faulty_rig, tmp_path, monkeypatch):
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["three"]["files"])
+    (flag,) = _middle(qc["decisions_required"])
+    assert flag.startswith(f"M2 tube {faulty_rig['contra']}: the middle beam "
+                           "(Monitor5.txt) recorded nothing after its last crossing")
+
+
+@pytest.mark.asyncio
+async def test_the_two_signals_are_reported_separately(faulty_rig, tmp_path,
+                                                       monkeypatch):
+    """Different kinds of evidence, so different entries — never merged into one
+    count that would read as two lines of evidence for one finding."""
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["three"]["files"])
+    board, middle = _board(qc["decisions_required"]), _middle(qc["decisions_required"])
+    assert len(board) == 1 and len(middle) == 1 and board[0] != middle[0]
+
+
+@pytest.mark.asyncio
+async def test_the_checks_flag_and_never_change_a_call(faulty_rig, tmp_path,
+                                                       monkeypatch):
+    """Every planted fly is alive in the summed signal, and stays called alive."""
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["three"]["files"])
+    planted = set(faulty_rig["dropped"]) | {faulty_rig["contra"]}
+    assert not [f for f in qc["flags"] if f["monitor"] == "M2" and f["channel"] in planted]
+
+
+@pytest.mark.asyncio
+async def test_a_fly_that_settles_at_one_end_trips_neither_check(rig, tmp_path,
+                                                                 monkeypatch):
+    """The behaviour per-beam QC called death — silent on middle and plug, alive
+    at the food end — is biology, and neither check may call it a board."""
+    qc = await _qc(tmp_path, monkeypatch, rig["files"])
+    assert _board(qc["decisions_required"]) == []
+    assert _middle(qc["decisions_required"]) == []
+
+
+@pytest.mark.asyncio
+async def test_swapping_the_end_roles_does_not_change_the_contradiction(
+        faulty_rig, tmp_path, monkeypatch):
+    """Only the middle matters to signal B, and a mirrored food/plug declaration
+    leaves the middle where it was."""
+    mirrored = MACHINES.replace("food: Monitor4.txt", "food: Monitor6.txt").replace(
+        "plug: Monitor6.txt", "plug: Monitor4.txt")
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["three"]["files"], mirrored)
+    assert len(_middle(qc["decisions_required"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_the_window_is_not_reported(faulty_rig, tmp_path,
+                                                          monkeypatch):
+    """Checked over the analysis window, like every other QC statement."""
+    r = faulty_rig["three"]["last_read"]
+    from datetime import datetime, timedelta
+    end = datetime.strptime(f"{r[1]} {r[2]}", "%d %b %y %H:%M:%S") - timedelta(hours=2)
+    qc = await _qc(tmp_path, monkeypatch, faulty_rig["three"]["files"],
+                   window_end=end.isoformat())
+    assert _board(qc["decisions_required"]) == []
+    assert _middle(qc["decisions_required"]) == []
+
+
+def test_an_undeclared_session_gets_no_board_checks():
+    from dam_mcp.sessions import Session
+    s = Session(session_id="dam-x", name="x", created_at="t", paths=["/no/such.txt"])
+    assert engine.board_checks(s) == []
