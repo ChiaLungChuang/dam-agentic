@@ -467,6 +467,15 @@ mortality, or real per-monitor clocks.
   wording true would have meant running them and printing a result, which is the
   number this entry says not to publish.
 
+  **The positive control now exists (2026-11-01).**
+  `tests/test_fake_agent.py::test_positive_answer_grounded_passes_on_a_number_taken_from_a_tool_result`
+  reads a number from a real `load_experiment` result, states it in a scripted
+  answer, drives the real agent and server, and asserts `passed is True` — `None`
+  fails it, so it cannot pass vacuously. It needs no engine. With both halves in
+  place, H18-2's two stated conditions are met; what remains true is that the
+  rail is still **not run** in any scored eval, which is the deliberate exclusion
+  above, not a gap.
+
   **The wider audit, which is the lesser finding.** At the unit level all seven
   `STRUCTURAL` rails have a positive control in `tests/test_properties.py`, on
   hand-built traces. At the **end-to-end** level — driving the real stdio server —
