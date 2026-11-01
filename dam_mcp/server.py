@@ -167,8 +167,9 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
     tradeoff, which window_tradeoff surfaces.
 
     Returns a per-monitor tally — per MACHINE on a beam rig, where QC runs on each
-    machine's beams summed per tube — the flagged channels with the evidence for each
-    call, and decisions_required — the list of exclusions a human must rule on. It
+    machine's beams summed per tube, plus decisions_required entries for apparent
+    board failures read from the individual beams — the flagged channels with the
+    evidence for each call, and decisions_required — the list of exclusions a human must rule on. It
     does NOT apply any exclusion; QC flags, it never fixes. Run this after
     load_experiment and before any compute_* tool.
     """
@@ -183,6 +184,7 @@ def run_qc(session_id: str, death_hours: float = DEFAULT_DEATH_HOURS) -> dict:
                               death_hours=death_hours, out_path=out,
                               window=session.window)
     shaped = engine.qc_tally_and_decisions(raw)
+    shaped["decisions_required"] += engine.board_checks(session, death_hours, session.window)
 
     session.qc[str(death_hours)] = shaped
     STORE.save(session)
@@ -277,6 +279,7 @@ def set_analysis_window(
     raw = engine.run_validate(engine.analysis_paths(session, STORE),
                               death_hours=death_hours, out_path=out, window=window)
     shaped = engine.qc_tally_and_decisions(raw)
+    shaped["decisions_required"] += engine.board_checks(session, death_hours, window)
 
     session.window = window
     session.qc[str(death_hours)] = shaped

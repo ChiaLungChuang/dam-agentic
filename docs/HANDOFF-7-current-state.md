@@ -343,10 +343,21 @@ mortality, or real per-monitor clocks.
   (HANDOFF-13 (a), (c), (d)). The beam rig is now *sayable*. Still open:
   (b) — nothing warns when a multi-file session declares no topology, so an
   undeclared beam rig is still analysed per beam, in silence, exactly as before
-  (deliberately: the undeclared path is unchanged by this slice); the board-failure
-  detector; the `run_qc` declaration-vs-data cross-check; and a `damsim` corpus
-  case that plants a beam rig. Session `dam-7010fc5ebdc9` is untouched — it was
-  loaded with no `machines:` block and stays the per-beam record of that run.
+  (deliberately: the undeclared path is unchanged by this slice); the `run_qc`
+  declaration-vs-data cross-check; and a `damsim` corpus case that plants a beam
+  rig. Session `dam-7010fc5ebdc9` is untouched — it was loaded with no
+  `machines:` block and stays the per-beam record of that run.
+
+  **The board-failure detector has landed (option C), as two separate signals in
+  `decisions_required`, never a refusal or a changed call** —
+  `engine.board_checks`. (A) same-read dropout: at least three tubes on one board
+  each called dead there by QC's own `death_hours` rule while alive on another
+  board, with the silence starting at the same read. (B) crossing contradiction:
+  after the middle beam's last crossing in a tube, the fly still reaches both the
+  food and the plug beam. **What neither catches:** a board that degrades
+  gradually (no shared onset — the case most like biology); an end board failing
+  in fewer than three tubes (indistinguishable from a fly avoiding that end); a
+  failure that recovers before the record ends.
 - **H13-1 — an accepted n-override is not in the record.** `assign_groups` refuses
   a mapping whose channel count contradicts the declaration's declared n, and the
   override (`n_override_reason` + `confirm_n_override=true`) is surfaced only in

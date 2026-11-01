@@ -10,8 +10,10 @@ and does not restate the evidence for it.
 > closed `food` / `middle` / `plug` vocabulary, summing in the engine before QC,
 > `Session.beams` keyed by role, and grouping by machine + tube. **(b) is not** —
 > the undeclared path is deliberately unchanged, so no warning yet fires when a
-> multi-file session declares no topology. Not yet built either: the board-failure
-> detector, the declaration-vs-data cross-check below, and step 4's `damsim` case.
+> multi-file session declares no topology. Not yet built either: the
+> declaration-vs-data cross-check below, and step 4's `damsim` case. The
+> board-failure detector has since landed as option C — two separate signals,
+> same-read dropout and crossing contradiction; see HANDOFF-7 H12-1.
 > `machines: independent` is accepted and means exactly what absence means. The
 > text below is the proposal as agreed and is left as it was.
 

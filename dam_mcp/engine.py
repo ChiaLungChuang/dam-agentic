@@ -19,7 +19,7 @@ import json
 import math
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -291,6 +291,126 @@ def analysis_paths(session: Session, store: SessionStore) -> list[str]:
         return session.paths
     build_machines(session, store)
     return [m["path"] for m in session.machine_monitors]
+
+
+# ── board-failure checks (beam rigs) ──────────────────────────────────────────
+#
+# Summing first means QC never sees a single beam — so it can no longer be fooled
+# by one, and it can no longer notice one failing either. These checks read the
+# retained per-beam data for exactly that, and only that: a hardware inference,
+# so each surfaces as a decisions_required entry with its evidence, never as a
+# refusal and never as a changed call. Two signals, reported separately because
+# they are different kinds of evidence:
+#
+#   A. SAME-READ DROPOUT. At least DROPOUT_MIN_TUBES tubes on one board are each
+#      called dead on that board by the same rule QC uses (trailing silence of at
+#      least death_hours) while still crossing another board, and their silence
+#      starts at the very same read. A per-beam death call with the fly alive
+#      elsewhere is, on its own, ordinary behaviour — a fly that stopped visiting
+#      that end — so it is the shared onset that carries the evidence: flies do
+#      not synchronise their last visit to a region to the minute; a board or a
+#      connector does. The minimum is a coincidence bound, not a biological
+#      threshold: two of 32 tubes sharing a last-visit minute by chance is a
+#      few-percent event over a long run, three is negligible.
+#   B. CROSSING CONTRADICTION. After the middle beam's last crossing in a tube,
+#      the same tube registers at BOTH the food and the plug beam. One fly cannot
+#      get from one end of its tube to the other without passing the middle, so
+#      this has no innocent reading and needs no threshold at all. It reads only
+#      which beam is the middle — so a declaration with food and plug swapped
+#      does not change it.
+#
+# What neither catches, stated so a clean result is not over-read:
+#   * a board that degrades gradually — no single read where tubes drop together,
+#     and that is the case most resembling biology;
+#   * an END board failing in fewer than DROPOUT_MIN_TUBES tubes — one silent plug
+#     beam looks exactly like one fly that stopped visiting the plug end;
+#   * a failure that recovers before the end of the record: both checks look at
+#     trailing silence only.
+
+DROPOUT_MIN_TUBES = 3
+
+
+def board_checks(session: Session, death_hours: float = DEFAULT_DEATH_HOURS,
+                 window: dict | None = None) -> list[str]:
+    """decisions_required entries for apparent board failures on a beam rig, over
+    `window` if one is set. [] for an undeclared session."""
+    if not session.beams:
+        return []
+    by_name = {Path(p).name: Path(p) for p in session.paths}
+    machines: dict[str, dict[str, Path]] = {}
+    for b in session.beams:
+        machines.setdefault(b["machine"], {})[b["role"]] = by_name[b["file"]]
+
+    start = datetime.fromisoformat(window["start"]) if window and window.get("start") else None
+    end = datetime.fromisoformat(window["end"]) if window and window.get("end") else None
+    out: list[str] = []
+    for machine, beams in machines.items():
+        rows = {role: _read_rows(path) for role, path in beams.items()}
+        stamps = sorted(t for t in set.intersection(*(set(r) for r in rows.values()))
+                        if (start is None or t >= start) and (end is None or t <= end))
+        if len(stamps) < 2:
+            continue
+        counts = {role: [[int(rows[role][t][_LIGHT_COL + c]) for t in stamps]
+                         for c in range(_N_EXPECTED_COLS - _LIGHT_COL)]
+                  for role in rows}
+        out += _same_read_dropouts(machine, beams, counts, stamps, death_hours)
+        out += _crossing_contradictions(machine, beams, counts, stamps)
+    return out
+
+
+def _last_active(series: list[int]) -> int | None:
+    return next((i for i in range(len(series) - 1, -1, -1) if series[i]), None)
+
+
+def _same_read_dropouts(machine, beams, counts, stamps, death_hours) -> list[str]:
+    dead_after = timedelta(hours=death_hours)
+    out = []
+    for role, tubes in counts.items():
+        by_read: dict[int, list[int]] = {}
+        for tube, series in enumerate(tubes, start=1):
+            last = _last_active(series)
+            if last is None or stamps[-1] - stamps[last] < dead_after:
+                continue                          # not called dead on this board
+            alive_elsewhere = any(
+                any(counts[other][tube - 1][last + 1:])
+                for other in counts if other != role)
+            if alive_elsewhere:
+                by_read.setdefault(last, []).append(tube)
+        for last, tubes_out in sorted(by_read.items()):
+            if len(tubes_out) >= DROPOUT_MIN_TUBES:
+                out.append(
+                    f"{machine} {role} board ({beams[role].name}): tubes "
+                    f"{', '.join(map(str, tubes_out))} all went silent after the "
+                    f"same read ({stamps[last].isoformat()}) and stayed silent for at "
+                    f"least {death_hours:g} h, while each of those flies kept crossing "
+                    "another board — a board or connector failure, not behaviour. "
+                    "Their summed signal still reads alive. Check the board; decide "
+                    "whether the tubes stay in."
+                )
+    return out
+
+
+def _crossing_contradictions(machine, beams, counts, stamps) -> list[str]:
+    if not {"food", "middle", "plug"} <= set(counts):
+        return []
+    out = []
+    for tube in range(1, len(counts["middle"]) + 1):
+        middle = counts["middle"][tube - 1]
+        last_mid = _last_active(middle)
+        after = 0 if last_mid is None else last_mid + 1
+        food_after = any(counts["food"][tube - 1][after:])
+        plug_after = any(counts["plug"][tube - 1][after:])
+        if food_after and plug_after:
+            since = ("at any point in the interval checked" if last_mid is None
+                     else f"after its last crossing at {stamps[last_mid].isoformat()}")
+            out.append(
+                f"{machine} tube {tube}: the middle beam ({beams['middle'].name}) "
+                f"recorded nothing {since}, yet the fly reached both the food and the "
+                "plug end afterwards — impossible without passing the middle, so the "
+                "middle beam for this tube has failed. The summed signal is "
+                "unaffected; check the board."
+            )
+    return out
 
 
 # ── QC (describe_experiment / run_qc) ─────────────────────────────────────────
