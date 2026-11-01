@@ -405,6 +405,17 @@ mortality, or real per-monitor clocks.
   Closing H13-2 needs a scorer that reads `truth["declaration"]`, drives the
   mapping, and reports refused-vs-proceeded per experiment as its own per-class
   precision/recall line.
+
+  **That scorer now exists (2026-11-01): `damsim/score_declarations.py`.** One
+  stdio server per experiment, pointed at that experiment's declaration;
+  `load_experiment` then `assign_groups(mapping)`; graded against the plant as
+  `declared_n_mismatch` precision/recall, plus a count of refusals that name the
+  group and both numbers. `tests/test_score_declarations.py` runs it in CI's
+  `test` job and checks both directions — a generated corpus scores 2 / 0 / 0
+  (tp / fp / fn), and the same corpus with every plant inverted scores
+  0 / 2 / 2 — so deleting the checksum now turns a test red that is not a unit
+  test on the hand-written fixture. Not added to the CI `eval` job (that would
+  be a workflow change; H18-3 is the place to decide it).
 - **H18-1 — the positive control was itself vacuous, and that is the finding.**
   `test_positive_control_scores_clean` asserted `all(pr.passed)` over seven rails
   while its script exercised **three**: it sets no window, applies no exclusion,
