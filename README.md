@@ -106,8 +106,17 @@ and the design is confounded. These are defects in the tooling, found by using i
   flags are lopsided by group (26 / 10 / 18 / 9), so a group difference in sleep can
   be a difference in how many animals were dying.
 - **Latency was reported without its denominator.** Sleep latency was defined for
-  52 / 71 / 21 / 18 channels of 96 per group. A 6.6× apparent difference sits on the
-  smallest n — a selection effect that would have become the headline result.
+  52 / 71 / 21 / 18 *[computed through the shifted engine — invalid pending
+  re-run; see below]* channels of 96 per group. A 6.6× *[same]* apparent
+  difference sits on the smallest n — a selection effect that would have become the
+  headline result.
+
+> **The two figures marked above were produced by Rtivity-Python v0.12.0, whose
+> parser read every channel from the wrong column** (channel *k* = tube *k − 1*,
+> channel 1 = the light sensor). They are invalid pending a re-run on the fixed
+> engine (0.12.1). The finding — a denominator the tool did not state — does not
+> depend on them. The other numbers in this section come from QC or from the raw
+> files, which read the right columns. `docs/HANDOFF-14-engine-column-shift.md`.
 
 None of these were reachable by the synthetic corpus: each needs a real light-dark
 cycle, real mortality, or real per-monitor clocks. Recorded in

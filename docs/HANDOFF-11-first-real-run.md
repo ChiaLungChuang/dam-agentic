@@ -7,6 +7,51 @@ found.** Nothing here is fixed except one docstring note, flagged inline, becaus
 handoff that reads as though the code was already right destroys the evidence that
 the run found anything.
 
+> **Read this first. Added 2026-11-01; see `HANDOFF-14-engine-column-shift.md`.**
+>
+> Every number below that came out of `compute_sleep` (or any `compute_*` or
+> `run_contrast`) was produced by **Rtivity-Python v0.12.0, whose parser read every
+> channel from the wrong column**: channel *k* was tube *k − 1*, channel 1 was the
+> light sensor, and tube 32 was never read. QC was not affected — it reads the file
+> with its own, correct parser — so QC's calls and the metrics disagreed about
+> which fly was which, on every channel. **Those figures are invalid pending a
+> re-run on the fixed engine (`cc44de0`, 0.12.1).** They are kept exactly as
+> found; no number here has been changed.
+>
+> Affected, by line: Finding 4's denominators **52 / 71 / 21 / 18** and the
+> latencies **8.1 min** vs **53.3 min** (the **6.6×**, the **18–21** and **52–71**);
+> Question 8's **4–5 h**, **107.6 min**, **82.9 bouts** and the **8,919 min**
+> derived from them, and the SD-exceeds-mean observation. Not affected: Findings 1
+> and 2 (`window_tradeoff` and the death rule are QC), Finding 3's **63** decisions
+> and **26 / 10 / 18 / 9** flags (QC), Findings 5 and 6 (the exclusion record, decided
+> from QC), and the run table's 384 channels, 9,708 reads and 60 s bins (read from
+> the raw files).
+>
+> **Could the shift explain Question 8?** In part, possibly; not by itself, and not
+> determinably from here:
+>
+> * On a file whose light field is 0 throughout (as on two of three real rig
+>   exports checked in HANDOFF-14), the engine's channel 1 is an all-zero tube — a
+>   fly "asleep" for the whole run. Rtivity clips a bout at the 24 h cycle boundary
+>   and assigns it to the phase it *starts* in (`modules/analysis/sleep.py`,
+>   `detect_sleep_bouts`, `_clip_to_cycle`), so that channel contributes one bout of
+>   up to 1,440 min, in whichever phase the run starts. One such channel per monitor
+>   is a handful of extreme bout durations per group — the signature Question 8 attributes to dying flies
+>   (long bouts, SD above the mean). Whether the real run's light fields were
+>   constant is not known here; the files are on the source machine.
+> * The "impossibility" does not need the shift, and is not established by the
+>   arithmetic. A bout assigned to the light phase can run on into the dark phase
+>   (clipping is at the cycle boundary, not the phase boundary), so light-phase bout
+>   duration × count is not bounded by light-phase time; and 107.6 × 82.9 multiplies
+>   two group means, which is not any fly's sleep — the mean of a product is not the
+>   product of the means.
+> * Separately, `total_sleep_time_h` is Rtivity's `tst_mean`: sleep in bouts that
+>   start in the **dark phase**, per day — not sleep per 24 h. "4–5 h" is per night.
+>
+> So the shift is a candidate contributor to Question 8's inflated bout durations,
+> alongside the two already listed, and none of the three is settled. The re-run on
+> the fixed engine separates the shift from the other two; nothing short of it does.
+
 > **Read this before using anything below. Added 2026-07-31; see
 > `HANDOFF-12-monitor-topology.md`.**
 >
