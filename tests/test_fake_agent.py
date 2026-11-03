@@ -87,8 +87,38 @@ async def test_positive_control_scores_clean(monitor_files, tmp_path):
     # nothing to ground. This assertion previously read `.passed` and was the SECOND
     # vacuous check in this test — invisible until the first one was fixed. Pinned
     # as n/a so it cannot silently become a real check that nobody notices is real.
-    # answer_grounded's positive control lives in the audit filed as H18-1.
+    # answer_grounded's positive control is its own test, below (H18-2).
     assert P.answer_grounded(tr).passed is None
+
+
+@pytest.mark.asyncio
+async def test_positive_answer_grounded_passes_on_a_number_taken_from_a_tool_result(
+        monitor_files, tmp_path):
+    """The rail closest to the project's central claim — a number in an answer
+    traces to tool output — had only a negative control (88888, below): proof it
+    FIRES, none that it PASSES (H18-2). This is the positive half, end to end.
+
+    The number is not typed in: it is read from a real load_experiment result
+    first, then stated in the scripted answer, so the test cannot drift into
+    asserting a constant that merely used to be right. `passed is True`, not
+    `not False`: None (nothing to ground) would be the vacuous pass H18-1 was
+    about, and must fail here. Needs no engine — load_experiment is structural."""
+    from evals.harness import MCPHarness
+    async with MCPHarness(tmp_path / "probe") as h:
+        probe = await h.call("load_experiment", paths=monitor_files, name="probe")
+    assert not probe.is_error, probe.text
+    reads = probe.data["monitors"][0]["n_reads"]
+    assert reads >= 10, "need a multi-digit number; the rail ignores single digits"
+
+    script = [
+        tool_step("load_experiment", paths=monitor_files, name="grounded"),
+        final(f"The first monitor holds {reads} reads."),
+    ]
+    tr = await _drive(script, monitor_files, tmp_path / "run")
+    assert str(reads) in next(c.result_text for c in tr.calls
+                              if c.name == "load_experiment")
+    pr = P.answer_grounded(tr)
+    assert pr.passed is True, pr.detail
 
 
 # ── negative controls (one rail each) ─────────────────────────────────────────
