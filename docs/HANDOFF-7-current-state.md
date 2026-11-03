@@ -305,6 +305,10 @@ mortality, or real per-monitor clocks.
 - **H11-4 — latency is reported without its denominator.** Defined for 52/71/21/18
   of 96 per group; the largest effect in the dataset sits on the smallest n, and
   the return says nothing about it. The agent caught this; the tool did not.
+  *[computed through the shifted engine — invalid pending re-run; HANDOFF-14]* The figures 52/71/21/18 above came from `compute_sleep` on
+  Rtivity-Python v0.12.0, which read channel k from tube k − 1 and channel 1 from
+  the light sensor. The finding — a denominator the tool does not state — does not
+  depend on them.
 - **H11-5 — an empty tube was excluded as mortality.** M9 ch16's last movement is
   six minutes after the run started. Excluding it is right; counting it as a death
   event is not, and any survival analysis on these exclusions would.
@@ -323,6 +327,12 @@ mortality, or real per-monitor clocks.
   interval. Either the two are computed over different intervals, or dying flies'
   trailing bouts inflate the mean (SD > mean points at the second, which ties to
   H11-3). **Settle before any sleep number leaves this system.**
+  *[computed through the shifted engine — invalid pending re-run; HANDOFF-14]* Every figure in this entry (4–5 h, ~8,919 min and the SD > mean
+  observation) came from `compute_sleep` on the shifted v0.12.0 reader. The
+  impossibility is also not established by the arithmetic: a light-phase bout is
+  clipped at the 24 h cycle boundary, not the phase boundary, and 107.6 × 82.9 is
+  a product of two group means. The shift is a third candidate cause
+  (HANDOFF-11's top note, added 2026-11-01).
 - **H12-1 — three monitor files are three beams on one population, and nothing in
   the system can say so.** Each apparatus is 32 tubes through three stacked
   detector boards; `Monitor1/2/3` are three IR beams at three positions along the *same
