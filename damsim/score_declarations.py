@@ -22,7 +22,10 @@ half a refusal.
 
 Usage:
     python damsim/generate.py --out /tmp/c --n-experiments 6 --declarations
-    python damsim/score_declarations.py --corpus /tmp/c
+    python damsim/score_declarations.py --corpus /tmp/c [--gate]
+
+`--gate` (used by the CI eval job) exits 1 unless every plant was graded as
+planted; see `gate`.
 """
 
 from __future__ import annotations
@@ -104,10 +107,36 @@ async def score_corpus(corpus: Path) -> dict:
             "aggregate": aggregate(per_exp), "per_experiment": per_exp}
 
 
+def gate(report: dict) -> list[str]:
+    """Reasons a CI gate should fail, empty when the checksum behaved exactly as
+    planted. The eval job runs with `--gate`: a planted mismatch that proceeds
+    is the defect this exists to catch, a matching declaration that is refused
+    is a checksum refusing everything, and a refusal that does not name the
+    group and both numbers is one a model cannot act on (CLAUDE.md, "Errors are
+    prompts"). An errored or empty run fails too — NO DATA is not a pass."""
+    reasons = []
+    if not report["n_scored"]:
+        reasons.append("no declaration was scored (NO DATA)")
+    if report["n_errored"]:
+        reasons.append(f"{report['n_errored']} experiment(s) errored before assign_groups")
+    agg = report["aggregate"]
+    r = agg["declared_n_mismatch"]
+    if r["fn"]:
+        reasons.append(f"{r['fn']} planted mismatch(es) PROCEEDED — the checksum did not refuse")
+    if r["fp"]:
+        reasons.append(f"{r['fp']} matching declaration(s) were REFUSED")
+    if agg["refusals_naming_group_and_numbers"] < r["tp"]:
+        reasons.append(f"{r['tp'] - agg['refusals_naming_group_and_numbers']} refusal(s) "
+                       "did not name the group and both numbers")
+    return reasons
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--gate", action="store_true",
+                    help="Exit 1 unless every plant was graded as planted (for CI).")
     args = ap.parse_args()
     report = asyncio.run(score_corpus(Path(args.corpus)))
     if args.out:
@@ -133,6 +162,13 @@ def main() -> int:
     for e in report["per_experiment"]:
         if "error" in e:
             print(f"  ERROR {e['experiment']}: {e['error']}")
+    if args.gate:
+        reasons = gate(report)
+        for why in reasons:
+            print(f"GATE FAILED: {why}")
+        if reasons:
+            return 1
+        print("GATE PASSED: every planted mismatch refused, every match proceeded.")
     return 0
 
 

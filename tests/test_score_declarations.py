@@ -18,7 +18,7 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from damsim.score_declarations import score_corpus
+from damsim.score_declarations import gate, score_corpus
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -62,3 +62,20 @@ def test_a_corpus_without_declarations_scores_nothing_rather_than_perfectly(tmp_
     assert report["n_scored"] == 0 and report["n_without_declaration"] == 4
     r = report["aggregate"]["declared_n_mismatch"]
     assert r["precision"] is None and r["recall"] is None
+
+
+def test_the_ci_gate_passes_only_when_every_plant_is_graded_as_planted(tmp_path):
+    good = asyncio.run(score_corpus(_corpus(tmp_path / "good", "--declarations")))
+    assert gate(good) == []
+    corpus = _corpus(tmp_path / "bad", "--declarations")
+    for gt in corpus.glob("exp_*/ground_truth.json"):
+        truth = json.loads(gt.read_text())
+        truth["declaration"]["mismatch"] = not truth["declaration"]["mismatch"]
+        gt.write_text(json.dumps(truth))
+    reasons = gate(asyncio.run(score_corpus(corpus)))
+    assert any("PROCEEDED" in r for r in reasons)
+    assert any("REFUSED" in r for r in reasons)
+
+
+def test_the_ci_gate_fails_on_no_data(tmp_path):
+    assert any("NO DATA" in r for r in gate(asyncio.run(score_corpus(_corpus(tmp_path / "c")))))

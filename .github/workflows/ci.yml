@@ -44,3 +44,9 @@ jobs:
       - run: pip install -e .
       - run: python damsim/generate.py --out /tmp/corpus --n-experiments 12 --seed 42 --adversarial
       - run: python damsim/score.py --corpus /tmp/corpus --qc-cmd "python skills/dam-qc/scripts/validate_dam.py"
+      # H13-2: the declared-n checksum, scored against a corpus that plants it.
+      # A separate corpus and seed so the QC baseline above is byte-identical.
+      # --gate turns this job red if a planted mismatch proceeds, a matching
+      # declaration is refused, or a refusal fails to name the group and numbers.
+      - run: python damsim/generate.py --out /tmp/decl --n-experiments 6 --seed 1337 --declarations
+      - run: python damsim/score_declarations.py --corpus /tmp/decl --gate
