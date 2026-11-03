@@ -180,9 +180,74 @@ the test that would pin it.
   `~/Desktop/Rtivity_main` — is unverified in any environment but one.
 * **`damr`'s reader** (used by Rtivity-DAM-sleep-analysis's Shiny analysis) is an
   external package and was not read.
-* **The v0.12.1 tag is not on GitHub.** It was created on `cc44de0` but the push from
-  the fixing session was refused (HTTP 403 from that session's git proxy). The pin
-  here is therefore the commit sha.
+* ~~**The v0.12.1 tag is not on GitHub.**~~ It is now (pushed by the owner,
+  resolves to `cc44de0`); the pin moved to it in #31 and on to the 0.13.0 commit
+  in the definition-change PR.
+
+---
+
+## Definition changes (2026-11-03) — not free fixes
+
+The owner decided two definitions. Both change what the system reports **on
+correct input**, so results before and after are not comparable. They are
+recorded here as definition changes, not as bug fixes that make old numbers
+"more right" for free.
+
+### Change 1 — a bout of n bins lasts n × bin width (Rtivity-Python 0.13.0)
+
+Rtivity-Python measured every run (sleep, wake, activity) as `t_last − t_first`,
+one bin short. That made the 5-minute sleep rule 6 min at 60 s and 5.5 min at
+30 s. In 0.13.0 a run ends one bin after its last read, with the bin width taken
+from the timestamps (Rtivity-Python PR #2, head `05c7272`).
+
+**60 s data is affected, not only 30 s.** Measured on a synthetic 60 s damsim
+monitor, 0.12.1 → 0.13.0:
+
+| Metric | 0.12.1 | 0.13.0 | Change |
+|---|---|---|---|
+| asleep rows | 13,172 | 13,827 | +5.0 % |
+| sleep bouts | 148 | 279 | +88.5 % |
+| mean total sleep, group A | 0.4698 h | 0.5495 h | +17.0 % |
+| mean total sleep, group B | 0.4435 h | 0.5383 h | +21.4 % |
+| activity bouts | 306 | 175 | −42.8 % |
+
+The asleep rows reconcile exactly: 655 more rows = 131 new five-bin bouts × 5
+rows. On real data the size depends on how many quiet runs sit exactly at the
+threshold. This is synthetic data, so the figure says the effect is large enough
+to matter; it does not say how large it is on any real experiment.
+
+### Change 2 — counts per waking minute is per actual minute (this repo)
+
+`_cpwm_by_phase` divided total counts by the number of moving **bins**: per
+minute at 60 s, and half the true rate at 30 s. It now divides by waking
+**minutes**, i.e. moving bins × that animal's bin width (median timestamp gap)
+÷ 60. The 60 s figures are unchanged by this. Both `compute_activity` and the
+`counts_per_waking_minute` contrast metric go through it.
+
+### What pins them
+
+- `tests/test_cpwm.py` (new, needs no engine). 6 tests; 3 fail on the old
+  definition (the 30 s and mixed-width cases).
+- `tests/test_metamorphic.py` (from #28). The 30 s / 60 s relations now hold
+  **exactly**, under a corrected transformation:
+  - The first version split the original counts, so a one-count minute became a
+    quiet half and a moving half. That split itself halves waking time, which is
+    why counts per waking minute still disagreed after the new definition
+    (2.165 at 60 s vs 2.822 at 30 s; 4.758 vs 2.564 before it).
+  - The pair is now a doubled 60 s file and its split, so counts, waking time
+    and quiet time are identical at both widths.
+  - Total activity, total sleep and counts per waking minute must all be equal
+    to rounding. That is tighter than the 90 s-per-bout and 10 % bounds they
+    replace.
+
+### Not changed
+
+- **The survival death window** (`survival._first_lethal_silence`) is measured
+  the same `t_last − t_first` way, so it is one bin longer than `dead_window_h`.
+  Recorded in Rtivity-Python's CHANGELOG, left for a separate decision.
+- **`_bin_minutes`** (used by the `total_sleep` contrast metric) falls back to
+  1.0 min when no gap can be read. That is an assumption, but a 1-read animal
+  has no sleep to scale, so it is recorded only.
 
 ---
 
@@ -206,5 +271,6 @@ the test that would pin it.
 3. Re-run HANDOFF-11's session on the fixed engine before any sleep, activity or
    contrast number from it is used — and run the differential test against the
    real 20251229 files as the same-experiment confirmation.
-4. Decide Finding 3 (`_cpwm_by_phase`) and Rtivity-Python draft PR #2 (bout
-   fencepost) — both are bin-width defects, both recorded, neither fixed.
+4. ~~Decide Finding 3 (`_cpwm_by_phase`) and Rtivity-Python draft PR #2 (bout
+   fencepost).~~ Decided 2026-11-03 — see "Definition changes" above. What
+   remains: merge Rtivity-Python PR #2, tag v0.13.0, move the pin to the tag.

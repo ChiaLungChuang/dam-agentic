@@ -826,12 +826,31 @@ def _bin_minutes(df: pd.DataFrame) -> float:
     return float(td.median()) / 60.0 if len(td) else 1.0
 
 
+def _bin_seconds_by_animal(df: pd.DataFrame) -> pd.Series:
+    """Each animal's bin width in seconds: the median gap between its own
+    consecutive timestamps (robust to a dropped read), never assumed. NaN for an
+    animal with fewer than two reads."""
+    def width(t: pd.Series) -> float:
+        gaps = np.diff(np.sort(t.to_numpy(dtype=float)))
+        gaps = gaps[gaps > 0]
+        return float(np.median(gaps)) if len(gaps) else np.nan
+    return df.groupby("id")["t"].apply(width)
+
+
 def _cpwm_by_phase(df: pd.DataFrame) -> pd.DataFrame:
-    """Counts per waking minute per animal per phase (total activity / active bins)."""
+    """Counts per waking minute per animal per phase.
+
+    Definition (changed 2026-11-03, HANDOFF-14 "Definition changes"): total
+    activity divided by waking MINUTES, where waking minutes = bins with
+    movement × that animal's bin width / 60, the width read from its own
+    timestamps. Before, the divisor was the bin count, which is per minute only
+    at 60 s bins and half the true rate at 30 s."""
     grp = df.groupby(["id", "labels", "order", "channel", "monitor", "phase"],
                      observed=True)
     agg = grp.agg(total=("activity", "sum"), waking=("moving", "sum")).reset_index()
-    agg["y"] = agg["total"] / agg["waking"].replace(0, np.nan)
+    agg["bin_s"] = agg["id"].map(_bin_seconds_by_animal(df))
+    waking_min = agg["waking"] * agg["bin_s"] / 60.0
+    agg["y"] = agg["total"] / waking_min.replace(0, np.nan)
     agg = agg.rename(columns={"phase": "x"})
     agg["y"] = agg["y"].fillna(0)
     cols = ["id", "labels", "order", "channel", "monitor", "x", "y"]

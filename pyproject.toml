@@ -33,10 +33,13 @@ dependencies = [
 # editable instead: `pip install -e /path/to/Rtivity-Python`. The engine provides
 # the `modules` package that dam_mcp.engine imports.
 #
-# v0.12.1 (commit cc44de0) reads channels from the right columns — v0.12.0 read
-# channel k from tube k-1 and channel 1 from the light sensor
-# (docs/HANDOFF-14-engine-column-shift.md). Never back to v0.12.0.
-engine = ["rtivity-python @ git+https://github.com/ChiaLungChuang/Rtivity-Python@v0.12.1"]
+# Pinned to commit 05c7272, the head of Rtivity-Python PR #2: 0.13.0, where a
+# bout of n bins lasts n x bin width (a metric definition change;
+# docs/HANDOFF-14-engine-column-shift.md, "Definition changes"). It is a commit,
+# not a tag, because v0.13.0 is not tagged yet — move this to @v0.13.0 once PR #2
+# is merged and tagged, after confirming the tag's tree matches 05c7272's.
+# 0.12.1 and later read channels from the right columns; never back to v0.12.0.
+engine = ["rtivity-python @ git+https://github.com/ChiaLungChuang/Rtivity-Python@05c727200f1059f441f170b3287b4427ced8fa6a"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff==0.16.0"]
 # OpenTelemetry for the Phase 2 observability pass. A soft dependency at runtime:
 # dam_mcp.observability degrades to a no-op tracer when it is absent (same pattern

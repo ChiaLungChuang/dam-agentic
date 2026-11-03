@@ -62,6 +62,16 @@ def split_to_30s(src: Path, dest: Path) -> Path:
     return _write(dest, out)
 
 
+def doubled(src: Path, dest: Path) -> Path:
+    """`src` with every count doubled. Split by `split_to_30s`, a doubled count
+    2c becomes (c, c): both halves move exactly when the minute moved, so the
+    30 s file has the same total counts, the same waking time and the same quiet
+    time as this 60 s file — with no count of 1 to split into (0, 1), which
+    would turn half a moving minute quiet."""
+    return _write(dest, [r[:10] + [str(2 * int(c)) for c in r[10:42]] + r[42:]
+                         for r in _rows(src)])
+
+
 # ── running the system ────────────────────────────────────────────────────────
 
 async def _metrics(h, files, mapping) -> dict:
@@ -145,26 +155,34 @@ async def test_listing_the_monitors_in_another_order_changes_no_group_statistic(
 
 
 # The 30 s / 60 s relation is split by metric, so that each verdict stands alone.
-# Tolerances are stated from the transformation, before looking at the result:
 #
-# * Total activity is a sum of counts; splitting a count into halves preserves
-#   it exactly. Tolerance: none.
-# * Sleep is ">= 5 min without a count". Halving can only ADD immobility: a
-#   minute with one count becomes a quiet 30 s plus a moving 30 s. So 30 s sleep
-#   may exceed 60 s sleep, by at most one 30 s bin at each end of each bout, plus
-#   the half-bin difference in how a bout's length is measured at two bin widths
-#   (Rtivity measures a bout first-bin to last-bin). Tolerance: 90 s per bout, on
-#   the 60 s bout count.
-# * Counts per waking minute is a rate per minute. The same counts over the same
-#   waking time must give the same rate; halving moves a little waking time to
-#   quiet, so the 30 s rate can only be a little higher. Tolerance: 10 %.
+# The pair is a doubled 60 s file and its exact 30 s split (`doubled`, then
+# `split_to_30s`): the same counts, the same waking time and the same quiet time
+# at two bin widths. Every metric below is a quantity of time or counts, not of
+# rows, so each must be EQUAL at the two widths, to rounding:
+#
+# * total activity — a sum of counts;
+# * total sleep — quiet runs cover the same minutes, and a run of n bins lasts
+#   n x bin width (Rtivity-Python 0.13.0);
+# * counts per waking minute — counts over waking minutes, the waking time
+#   being moving bins x bin width (HANDOFF-14, "Definition changes").
+#
+# History: the first version split the ORIGINAL counts, so a one-count minute
+# became a quiet half and a moving half, and stated tolerances (90 s per bout,
+# 10 %) for that. Counts per waking minute failed it at 4.758 vs 2.564 (counts
+# per bin); with the per-minute definition it still failed, at 2.165 vs 2.822,
+# because that split itself halves the waking time of every one-count minute.
+# The transformation was what made the comparison inexact, so it was replaced
+# by one under which the relation is exact, and the tolerances tightened to
+# rounding. Nothing here is looser than before.
 
 async def _at_two_bin_widths(monitor_files, tmp_path):
     src = Path(monitor_files[0])
-    half = split_to_30s(src, tmp_path / "30s" / src.name)
+    sixty = doubled(src, tmp_path / "60s" / src.name)
+    half = split_to_30s(sixty, tmp_path / "30s" / src.name)
     groups = _one_monitor_groups(src.name)
     async with MCPHarness(tmp_path / "s") as h:
-        return (await _metrics(h, [src], groups), await _metrics(h, [half], groups))
+        return (await _metrics(h, [sixty], groups), await _metrics(h, [half], groups))
 
 
 @pytest.mark.asyncio
@@ -178,22 +196,13 @@ async def test_total_activity_is_the_same_at_30s_and_60s(monitor_files, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_total_sleep_agrees_at_30s_and_60s_within_a_bin_per_bout(
-        monitor_files, tmp_path):
+async def test_total_sleep_is_the_same_at_30s_and_60s(monitor_files, tmp_path):
     m60, m30 = await _at_two_bin_widths(monitor_files, tmp_path)
-    tst60 = _rows_by_key(m60["compute_sleep"]["total_sleep_time_h"])
-    tst30 = _rows_by_key(m30["compute_sleep"]["total_sleep_time_h"])
-    bouts = _rows_by_key(m60["compute_sleep"]["sleep_bout_count_by_phase"])
-    assert set(tst60) == set(tst30)
-    for (label, x), r60 in tst60.items():
-        # Whole-run bouts in both phases: total sleep is per day, so this
-        # over-counts the bouts behind it — a looser bound, never a tighter one.
-        n_bouts = sum(r["mean"] for (lab, _), r in bouts.items() if lab == label)
-        bound_h = (n_bouts + 1) * 90 / 3600
-        diff = tst30[(label, x)]["mean"] - r60["mean"]
-        assert abs(diff) <= bound_h, (
-            f"{label}: total sleep {r60['mean']:.4f} h at 60 s, "
-            f"{tst30[(label, x)]['mean']:.4f} h at 30 s (bound {bound_h:.4f} h)")
+    a = _rows_by_key(m60["compute_sleep"]["total_sleep_time_h"])
+    b = _rows_by_key(m30["compute_sleep"]["total_sleep_time_h"])
+    assert set(a) == set(b)
+    for k in a:
+        assert_same(a[k]["mean"], b[k]["mean"], f"total sleep {k}")
 
 
 @pytest.mark.asyncio
@@ -203,6 +212,6 @@ async def test_counts_per_waking_minute_agree_at_30s_and_60s(monitor_files, tmp_
     b = _rows_by_key(m30["compute_activity"]["counts_per_waking_minute_by_phase"])
     assert set(a) == set(b)
     for k in a:
-        assert math.isclose(a[k]["mean"], b[k]["mean"], rel_tol=0.10), (
+        assert math.isclose(a[k]["mean"], b[k]["mean"], rel_tol=1e-9), (
             f"counts per waking minute {k}: {a[k]['mean']:.3f} at 60 s, "
             f"{b[k]['mean']:.3f} at 30 s")
