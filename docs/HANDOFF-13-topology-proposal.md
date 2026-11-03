@@ -496,10 +496,10 @@ changes, per finding, if topology is implemented:
 | **F1 — `window_tradeoff` non-monotonic** | **Must be recomputed.** The curve was over 384 per-beam channels. The mechanism (threshold = dark phase) is independent of beams, so the shape will likely survive — but the numbers in the table are not the numbers a summed run produces, and the finding must not be quoted as though they are |
 | **F2 — `death_hours` 12 vs LD 12:12** | **Unaffected and still open.** Nothing about summing changes the coincidence. This remains the first thing to fix and topology does not touch it |
 | **F3 — `compute_*` runs with QC decisions outstanding** | **Unaffected in kind, changed in degree.** The 63 `decisions_required` and the 26/10/18/9 split are per-beam counts and would be recomputed; the defect — a precondition nothing enforces — is untouched |
-| **F4 — latency without its denominator** | **Unaffected in kind.** 52/71/21/18 of 96 are per-beam; the denominators change, the missing-denominator defect does not |
+| **F4 — latency without its denominator** | **Unaffected in kind.** 52/71/21/18 of 96 are per-beam; the denominators change, the missing-denominator defect does not — and the figures themselves came through the shifted v0.12.0 reader, so they are invalid pending re-run (HANDOFF-14) |
 | **F5, F6 — the exclusion record** | **Must be revisited.** Both are read off exclusions taken per beam, and M9 ch16 is a beam, not a tube. Whether that channel is an empty tube depends on all three beams |
 | **Q7 — repeated channel indices** | Already closed by HANDOFF-12 |
-| **Q8 — sleep units unverified** | **Unaffected.** Arithmetically impossible over one interval regardless of how many beams fed it |
+| **Q8 — sleep units unverified** | **Unaffected.** Arithmetically impossible over one interval regardless of how many beams fed it. *(2026-11-01: the figures came through the shifted v0.12.0 reader, and HANDOFF-11's top note explains why the arithmetic does not establish an impossibility — HANDOFF-14)* |
 
 The pattern: **topology changes the numbers in HANDOFF-11 and changes almost none
 of its findings.** Four of six are about a tool reporting a number without the
