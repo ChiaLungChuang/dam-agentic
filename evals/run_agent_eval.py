@@ -34,10 +34,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -52,6 +54,33 @@ from .scoring import aggregate, format_report
 from .trace import Trace, from_messages
 
 REPO = Path(__file__).resolve().parent.parent
+
+# Where each eval run's audit log and trace go (GitHub issue #2). Exploratory
+# runs — the default — land under a gitignored directory; runs meant to be cited
+# are written with --publish under evals/traces/<run_id>/, which git tracks.
+# DAM_EVAL_TRACE_ROOT overrides the exploratory root (the test suite points it
+# at a temp dir so running the tests leaves nothing in the checkout).
+PUBLISHED_ROOT = REPO / "evals" / "traces"
+EXPLORATORY_ROOT = REPO / "evals" / ".traces"
+
+
+def run_dir(run_id: str, *, publish: bool, root: Path | None) -> Path:
+    """The directory one run's `audit.jsonl` and `trace.json` are written to.
+    An explicit `root` wins; otherwise published or exploratory."""
+    if root is not None:
+        return Path(root) / run_id
+    if publish:
+        return PUBLISHED_ROOT / run_id
+    env = os.environ.get("DAM_EVAL_TRACE_ROOT")
+    return (Path(env) if env else EXPLORATORY_ROOT) / run_id
+
+
+def _write_trace(directory: Path, record: dict) -> None:
+    """Write one run's trace as it ends — every outcome, so a crashed or aborted
+    run still leaves its record. JSON, indented: it is read by people diagnosing a
+    one-off failure, not by a pipeline."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "trace.json").write_text(json.dumps(record, indent=2, default=str))
 
 
 class EvalAborted(RuntimeError):
@@ -166,7 +195,9 @@ def _mint_run_id(task_name: str, stamp: str, index: int) -> str:
 
 
 async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
-                   llm=None, stamp: str | None = None):
+                   llm=None, stamp: str | None = None, *,
+                   trace_root: Path | None = None, publish: bool = False,
+                   model_id: str | None = None):
     """Run one task `runs` times. An infrastructure failure raises EvalAborted (the
     caller aborts the whole eval). An agent-behaviour failure, or a completed run
     that made no tool call, becomes a recorded crash — counted, never scored.
@@ -179,6 +210,11 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
     for a completed run, ERROR for a crash or an abort. Task success is a separate
     axis (`dam.task_completed`): a run can complete, violate no rail, and still fail
     its task, so task failure does not by itself errored the span.
+
+    Each run gets its own directory (`run_dir`): its server subprocess is
+    started with DAM_MCP_AUDIT_LOG pointing at `<dir>/audit.jsonl`, so that log
+    holds that run's lines only, and `<dir>/trace.json` is written as the run
+    ends — completed, crashed or aborted (GitHub issue #2).
     """
     from agent import build_agent
 
@@ -195,8 +231,13 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
             # Trace exists, so an id derived from the Trace would leave exactly
             # those runs unattributable.
             run_id = _mint_run_id(task.name, stamp, index)
+            rdir = run_dir(run_id, publish=publish, root=trace_root)
+            rdir.mkdir(parents=True, exist_ok=True)
+            header = {"run_id": run_id, "task": task.name, "model_id": model_id,
+                      "audit_log": str(rdir / "audit.jsonl")}
             agent = await build_agent(model=model, provider=provider, llm=llm,
-                                      env_extra={"DAM_RUN_ID": run_id})
+                                      env_extra={"DAM_RUN_ID": run_id,
+                                                 "DAM_MCP_AUDIT_LOG": str(rdir / "audit.jsonl")})
             start = time.perf_counter()
             with tracer.start_as_current_span("dam.agent.run") as run_span:
                 run_span.set_attribute("dam.eval.task", task.name)
@@ -211,15 +252,22 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
                         run_span.set_attribute("dam.eval.outcome", "aborted")
                         run_span.record_exception(exc)
                         observability.mark_span(run_span, "aborted", reason)
+                        _write_trace(rdir, {**header, "outcome": "aborted",
+                                            "abort_reason": reason,
+                                            "exception": f"{type(exc).__name__}: {exc}",
+                                            "latency_s": time.perf_counter() - start})
                         raise EvalAborted(reason) from exc
                     run_span.set_attribute("dam.eval.outcome", "crashed")
                     run_span.record_exception(exc)
                     observability.mark_span(run_span, "crashed", type(exc).__name__)
-                    traces.append(Trace(
+                    crashed = Trace(
                         task=task.name, latency_s=time.perf_counter() - start,
                         crashed=True,
                         crash_cause=f"{type(exc).__name__}: {str(exc)[:200]}",
-                        task_completed=False))
+                        task_completed=False)
+                    traces.append(crashed)
+                    _write_trace(rdir, {**header, "outcome": "crashed",
+                                        **asdict(crashed)})
                     continue
 
                 trace = from_messages(task.name, result["messages"],
@@ -235,6 +283,7 @@ async def run_task(task: EvalTask, runs: int, model: str | None, provider: str,
                                        bool(trace.task_completed))
                 observability.mark_span(run_span, outcome, trace.crash_cause or None)
                 traces.append(trace)
+                _write_trace(rdir, {**header, "outcome": outcome, **asdict(trace)})
     return aggregate(task.name, traces), traces
 
 
@@ -297,13 +346,14 @@ async def _main(args) -> int:
     # is printed because the commonest way to conclude "the run ids did nothing"
     # is to grep the default location out of habit while the run wrote elsewhere.
     stamp = _run_stamp()
-    from dam_mcp import audit
-    print(f"run ids: eval-{stamp}-<task>-r<n>   audit log: "
-          f"{audit.resolve_audit_path()}", file=sys.stderr)
+    where = run_dir(f"eval-{stamp}-<task>-r<n>", publish=args.publish, root=None)
+    print(f"run ids: eval-{stamp}-<task>-r<n>   per-run audit log + trace: "
+          f"{where}/", file=sys.stderr)
     for task in tasks:
         print(f"running {task.name} x{args.runs} [{model_id}] ...", file=sys.stderr)
         score, traces = await run_task(task, args.runs, args.model, args.provider,
-                                       stamp=stamp)
+                                       stamp=stamp, publish=args.publish,
+                                       model_id=model_id)
         if args.judge:
             grades = [await judge_report(t.final_text, args.model, args.provider)
                       for t in traces]
@@ -333,6 +383,9 @@ def main() -> int:
     ap.add_argument("--model", default=None, help="override the provider's default id")
     ap.add_argument("--judge", action="store_true", help="grade report prose (needs a key)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--publish", action="store_true",
+                    help="write each run's audit log + trace under evals/traces/<run_id>/ "
+                         "(tracked) instead of the gitignored evals/.traces/")
     try:
         return asyncio.run(_main(ap.parse_args()))
     except EvalAborted as exc:

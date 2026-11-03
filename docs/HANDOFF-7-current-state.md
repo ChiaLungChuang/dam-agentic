@@ -279,6 +279,12 @@ pushed and reported clean. The account is in `HANDOFF-9`.
   args, outcome, timestamp, files and error text per call, and `run_id` now closes
   the attribution half. Re-read the issue against `docs/observability.md` before
   building anything further.
+  **Built 2026-11-03** (its own PR): every eval run now gets a directory with its
+  own `audit.jsonl` (DAM_MCP_AUDIT_LOG set for that run's server only) and a
+  `trace.json` holding each call's args, `is_error` and full result text, written
+  on every outcome. Exploratory runs → gitignored `evals/.traces/`; `--publish`
+  → tracked `evals/traces/<run_id>/`; interactive use keeps the default path.
+  This also gives eval runs a retained audit stream — the eval half of H18-4.
 
 #### From the first real run — all eight in `docs/HANDOFF-11-first-real-run.md`
 
