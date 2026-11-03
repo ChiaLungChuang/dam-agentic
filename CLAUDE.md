@@ -166,11 +166,16 @@ methods. If a claim can't be verified from the repo, don't write it.
   before instantiating a real model, verifying against the OS trust store without
   weakening verification. Never `verify=False`. `pip` itself is unaffected.
 - **Engine resolution.** `rtivity-python` is installed editable from
-  `~/Rtivity-Python`, which shadows the pinned `@v0.12.0` git dependency; both are
-  at v0.12.0 so they agree — confirm with `git -C ~/Rtivity-Python describe --tags`
-  before attributing a result. `pip show rtivity-python` reporting 0.11.0 is the
-  known version-string mismatch (tag bumped, `version=` string not), not a stale
-  install.
+  `~/Rtivity-Python`, which shadows the pinned git dependency — so the editable
+  checkout, not the pin, decides what runs. The pin is commit `cc44de0` (the
+  0.12.1 fix; a `v0.12.1` tag is pending). **v0.12.0 read every channel from the
+  wrong column** (channel k = tube k − 1, channel 1 = light sensor;
+  `docs/HANDOFF-14-engine-column-shift.md`); any result computed on it is invalid.
+  Before attributing a result, confirm the engine is 0.12.1 or later:
+  `git -C ~/Rtivity-Python describe --tags` and
+  `python -c "import importlib.metadata as m; print(m.version('rtivity-python'))"`.
+  A reported 0.11.0 means v0.12.0 (its `version=` string was never bumped) — the
+  shifted reader, not a harmless mismatch.
 
 ## Layout
 
