@@ -198,7 +198,7 @@ recorded here as definition changes, not as bug fixes that make old numbers
 Rtivity-Python measured every run (sleep, wake, activity) as `t_last − t_first`,
 one bin short. That made the 5-minute sleep rule 6 min at 60 s and 5.5 min at
 30 s. In 0.13.0 a run ends one bin after its last read, with the bin width taken
-from the timestamps (Rtivity-Python PR #2, head `05c7272`).
+from the timestamps (Rtivity-Python PR #2, head `5f3948d`).
 
 **60 s data is affected, not only 30 s.** Measured on a synthetic 60 s damsim
 monitor, 0.12.1 → 0.13.0:
@@ -240,14 +240,14 @@ minute at 60 s, and half the true rate at 30 s. It now divides by waking
     to rounding. That is tighter than the 90 s-per-bout and 10 % bounds they
     replace.
 
-### Not changed
+### Also changed (2026-11-11), same family
 
-- **The survival death window** (`survival._first_lethal_silence`) is measured
-  the same `t_last − t_first` way, so it is one bin longer than `dead_window_h`.
-  Recorded in Rtivity-Python's CHANGELOG, left for a separate decision.
-- **`_bin_minutes`** (used by the `total_sleep` contrast metric) falls back to
-  1.0 min when no gap can be read. That is an assumption, but a 1-read animal
-  has no sleep to scale, so it is recorded only.
+- **The survival death window** (`survival._first_lethal_silence`, Rtivity-Python
+  0.13.0) now measures a silent run as n bins × bin width too, so the window
+  equals `dead_window_h`: 720 silent 60 s bins meet 12 h, where 721 were needed.
+- **`_bin_minutes`** (this repo; scales asleep bins for the `total_sleep`
+  contrast metric) raises a ToolError when no positive gap between reads can be
+  found, instead of assuming 1.0 min. `tests/test_bin_minutes.py`.
 
 ---
 

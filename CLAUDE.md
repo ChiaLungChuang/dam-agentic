@@ -167,7 +167,7 @@ methods. If a claim can't be verified from the repo, don't write it.
   weakening verification. Never `verify=False`. `pip` itself is unaffected.
 - **Engine resolution.** `rtivity-python` is installed editable from
   `~/Rtivity-Python`, which shadows the pinned git dependency — so the editable
-  checkout, not the pin, decides what runs. The pin is commit `05c7272`
+  checkout, not the pin, decides what runs. The pin is commit `5f3948d`
   (0.13.0, bouts last n × bin width; a `v0.13.0` tag is pending). **v0.12.0 read every channel from the
   wrong column** (channel k = tube k − 1, channel 1 = light sensor;
   `docs/HANDOFF-14-engine-column-shift.md`); any result computed on it is invalid.

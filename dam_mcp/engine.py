@@ -820,10 +820,22 @@ def _per_animal_metric(ds, metric: str, phase: str) -> pd.DataFrame:
 # ── small analysis helpers ────────────────────────────────────────────────────
 
 def _bin_minutes(df: pd.DataFrame) -> float:
-    """Bin width in minutes, from the data's own cadence — never assumed."""
+    """Bin width in minutes, from the data's own cadence — never assumed.
+
+    Raises when no positive gap between reads can be found (one read per
+    animal, or only duplicate timestamps). It used to return 1.0 then — an
+    assumed bin width, which mis-scales every sleep figure on any rig that is
+    not 1 min, silently."""
     td = df["time_diff"].dropna()
     td = td[td > 0]
-    return float(td.median()) / 60.0 if len(td) else 1.0
+    if not len(td):
+        raise ToolError(
+            "Cannot read a bin width from the data: no two consecutive reads of any "
+            "animal have increasing timestamps in the analysed window, so sleep "
+            "time cannot be scaled to hours without assuming one. Check the analysis "
+            "window (it may cover a single read) and the monitor files' timestamps, "
+            "then rerun.")
+    return float(td.median()) / 60.0
 
 
 def _bin_seconds_by_animal(df: pd.DataFrame) -> pd.Series:
