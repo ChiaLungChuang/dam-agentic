@@ -1,7 +1,27 @@
 experiment: tau-geneswitch-young-2026-07
 
+# AMENDED 2026-11-11, AFTER THE DATA WERE SEEN (the HANDOFF-11 run). This
+# amendment adds hardware topology (`machines:`) and a declared n per group. The
+# four groups and their labels are unchanged from the original declaration; no
+# group was added, removed or renamed, and no contrast is declared.
+#
+# Why: HANDOFF-12 found that each block of three monitor files is three IR beams
+# on ONE rack of 32 tubes - the same 32 flies seen three times - so each group
+# is 32 animals, not 96. The declared n lets assign_groups refuse a mapping that
+# assigns per-beam channels and so triples n.
+#
+# Beam order within each machine (food -> middle -> plug, in file order) is the
+# statement of the person who set up the rig, 2026-11-11. It has not been
+# derived from the data.
+
 groups:
-  - control_EtOH    # monitor 1, channels 1-32
-  - control_RU      # monitor 4, channels 1-32
-  - tau_EtOH        # monitor 7, channels 1-32
-  - tau_RU          # monitor 10, channels 1-32
+  control_EtOH: 32    # machine M1: Monitor1-3, tubes 1-32
+  control_RU: 32      # machine M4: Monitor4-6, tubes 1-32
+  tau_EtOH: 32        # machine M7: Monitor7-9, tubes 1-32
+  tau_RU: 32          # machine M10: Monitor10-12, tubes 1-32
+
+machines:
+  M1:  {food: Monitor1.txt,  middle: Monitor2.txt,  plug: Monitor3.txt}
+  M4:  {food: Monitor4.txt,  middle: Monitor5.txt,  plug: Monitor6.txt}
+  M7:  {food: Monitor7.txt,  middle: Monitor8.txt,  plug: Monitor9.txt}
+  M10: {food: Monitor10.txt, middle: Monitor11.txt, plug: Monitor12.txt}
