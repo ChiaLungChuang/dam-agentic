@@ -198,7 +198,8 @@ recorded here as definition changes, not as bug fixes that make old numbers
 Rtivity-Python measured every run (sleep, wake, activity) as `t_last − t_first`,
 one bin short. That made the 5-minute sleep rule 6 min at 60 s and 5.5 min at
 30 s. In 0.13.0 a run ends one bin after its last read, with the bin width taken
-from the timestamps (Rtivity-Python PR #2, head `5f3948d`).
+from the timestamps (Rtivity-Python PR #2, head `5f3948d`; merged 2026-11-11 as `598a5ab`, tagged
+v0.13.0, same tree).
 
 **60 s data is affected, not only 30 s.** Measured on a synthetic 60 s damsim
 monitor, 0.12.1 → 0.13.0:
@@ -273,4 +274,7 @@ minute at 60 s, and half the true rate at 30 s. It now divides by waking
    real 20251229 files as the same-experiment confirmation.
 4. ~~Decide Finding 3 (`_cpwm_by_phase`) and Rtivity-Python draft PR #2 (bout
    fencepost).~~ Decided 2026-11-03 — see "Definition changes" above. What
-   remains: merge Rtivity-Python PR #2, tag v0.13.0, move the pin to the tag.
+   remained: merge Rtivity-Python PR #2, tag v0.13.0, move the pin to the tag.
+   Done 2026-11-11: merged as `598a5ab`, tagged v0.13.0, pin moved to
+   `@v0.13.0`. Step 2 above now means confirming the editable engine reports
+   0.13.0, not 0.12.1.
