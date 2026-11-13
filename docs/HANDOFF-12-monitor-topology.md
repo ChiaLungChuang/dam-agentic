@@ -14,8 +14,9 @@ the feature this implies needs a design decision that has not been made.
 Each apparatus is **one rack of 32 horizontal plastic tubes passing through three
 stacked detector boards**. `Monitor1`, `Monitor2` and `Monitor3` are not three
 experiments, three racks, or three populations. They are **three IR beams at three
-positions along the same 32 tubes, watching the same 32 flies** — the plug / middle /
-food arrangement used for position tracking. Confirmed from photographs of the
+positions along the same 32 tubes, watching the same 32 flies** — the food / middle /
+plug arrangement used for position tracking, in that file order (corrected
+2026-11-11; see below). Confirmed from photographs of the
 apparatus. Every layer of this system — the loader, the grouping tool, the QC
 detector, the metrics, the contrast machinery — treats a monitor file as an
 independent set of animals, and on this rig that is false.
@@ -74,7 +75,7 @@ closed by this document, and it did not need the second experiment it asked for.
 ## Evidence chain
 
 1. **Photographs of the apparatus** show 32 horizontal tubes passing through three
-   stacked detector boards — the plug / middle / food arrangement. This is the
+   stacked detector boards — the food / middle / plug arrangement. This is the
    primary evidence and it is external to the data.
 2. **Channel indices repeat across monitors, to the minute.** Monitor2 ch10 and
    Monitor3 ch10 last move at 09:15 and 09:14; Monitor11 ch32 and Monitor12 ch32 are
@@ -123,9 +124,14 @@ context that makes it interpretable — and it is the largest instance found so 
 * **No re-analysis was run.** The corrected n has not been pushed through
   `compute_sleep` or any contrast; nothing here reports what the numbers would
   become. The 3× claim is arithmetic on the design, not a measured result.
-* **The beam-to-position mapping is not verified per file.** That Monitor1/2/3 are
-  plug/middle/food *in that order* is the stated arrangement; which file is which
-  position has not been confirmed from the data, and nothing here depends on it.
+* **The beam-to-position mapping is not verified per file.** Monitor1/2/3 are
+  **food / middle / plug, in that order** (likewise 4/5/6, 7/8/9, 10/11/12): the
+  statement of the person who set up the rig, recorded 2026-11-11 and declared in
+  `config/tau-geneswitch-young-2026-07.yaml`'s `machines:` block. *Corrected
+  2026-11-11: this paragraph and two above first said plug/middle/food, the
+  reverse.* Which file is which position has not been confirmed from the data;
+  summed per tube, n and totals do not depend on it, but the board checks and any
+  position analysis do.
 * **Whether every block of three in this session follows the same pattern** is
   inferred from 12 = 4 × 3 and from the paired last-movement times in two blocks.
   It has not been checked for all four blocks.
