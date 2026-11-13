@@ -820,18 +820,49 @@ def _per_animal_metric(ds, metric: str, phase: str) -> pd.DataFrame:
 # ── small analysis helpers ────────────────────────────────────────────────────
 
 def _bin_minutes(df: pd.DataFrame) -> float:
-    """Bin width in minutes, from the data's own cadence — never assumed."""
+    """Bin width in minutes, from the data's own cadence — never assumed.
+
+    Raises when no positive gap between reads can be found (one read per
+    animal, or only duplicate timestamps). It used to return 1.0 then — an
+    assumed bin width, which mis-scales every sleep figure on any rig that is
+    not 1 min, silently."""
     td = df["time_diff"].dropna()
     td = td[td > 0]
-    return float(td.median()) / 60.0 if len(td) else 1.0
+    if not len(td):
+        raise ToolError(
+            "Cannot read a bin width from the data: no two consecutive reads of any "
+            "animal have increasing timestamps in the analysed window, so sleep "
+            "time cannot be scaled to hours without assuming one. Check the analysis "
+            "window (it may cover a single read) and the monitor files' timestamps, "
+            "then rerun.")
+    return float(td.median()) / 60.0
+
+
+def _bin_seconds_by_animal(df: pd.DataFrame) -> pd.Series:
+    """Each animal's bin width in seconds: the median gap between its own
+    consecutive timestamps (robust to a dropped read), never assumed. NaN for an
+    animal with fewer than two reads."""
+    def width(t: pd.Series) -> float:
+        gaps = np.diff(np.sort(t.to_numpy(dtype=float)))
+        gaps = gaps[gaps > 0]
+        return float(np.median(gaps)) if len(gaps) else np.nan
+    return df.groupby("id")["t"].apply(width)
 
 
 def _cpwm_by_phase(df: pd.DataFrame) -> pd.DataFrame:
-    """Counts per waking minute per animal per phase (total activity / active bins)."""
+    """Counts per waking minute per animal per phase.
+
+    Definition (changed 2026-11-03, HANDOFF-14 "Definition changes"): total
+    activity divided by waking MINUTES, where waking minutes = bins with
+    movement × that animal's bin width / 60, the width read from its own
+    timestamps. Before, the divisor was the bin count, which is per minute only
+    at 60 s bins and half the true rate at 30 s."""
     grp = df.groupby(["id", "labels", "order", "channel", "monitor", "phase"],
                      observed=True)
     agg = grp.agg(total=("activity", "sum"), waking=("moving", "sum")).reset_index()
-    agg["y"] = agg["total"] / agg["waking"].replace(0, np.nan)
+    agg["bin_s"] = agg["id"].map(_bin_seconds_by_animal(df))
+    waking_min = agg["waking"] * agg["bin_s"] / 60.0
+    agg["y"] = agg["total"] / waking_min.replace(0, np.nan)
     agg = agg.rename(columns={"phase": "x"})
     agg["y"] = agg["y"].fillna(0)
     cols = ["id", "labels", "order", "channel", "monitor", "x", "y"]
