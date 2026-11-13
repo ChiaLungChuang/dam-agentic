@@ -33,6 +33,14 @@ def _pin_contrasts_to_fixture(monkeypatch):
     monkeypatch.setenv("DAM_PREREG_PATH", str(FIXTURE_CONTRASTS))
 
 
+# Exploratory eval runs write one audit log + trace per run under
+# evals/.traces/ (issue #2). Tests that call run_task without an explicit root
+# would otherwise leave directories in the checkout; point them at a temp dir.
+@pytest.fixture(autouse=True)
+def _eval_traces_out_of_the_checkout(monkeypatch, tmp_path_factory):
+    monkeypatch.setenv("DAM_EVAL_TRACE_ROOT", str(tmp_path_factory.getbasetemp() / "eval-traces"))
+
+
 # Session-scoped: the synthetic monitor files are read-only, so generating them
 # once and sharing them across the whole run turns a ~2.5 min suite (a fresh
 # corpus per test) into seconds of setup. Per-test state still uses function-scoped
